@@ -1,14 +1,403 @@
-# ==================================
-# Pipeline Configuration (Numeric/Model Settings)
-# ==================================
-EMBEDDING_MODEL_NAME="text-embedding-3-small"
-EMBEDDING_DIMENSION="1536"
-CHUNK_TOKEN_TARGET="256"
-PARENT_TOKEN_TARGET="1500"
+"""
+Configuration Module for UCG-23 RAG ETL Pipeline
+
+Loads configuration from environment variables (.env file) and validates
+that all required settings are present. Includes model settings, API keys,
+file paths, and batch processing parameters.
+"""
+
+import os
+import sys
+from pathlib import Path
+from typing import Optional
+from dotenv import load_dotenv
+
+
+# Load environment variables from .env file
+# Look for .env in the project root (parent of src/)
+env_path = Path(__file__).parent.parent / ".env"
+if env_path.exists():
+    load_dotenv(env_path)
+else:
+    # Try loading from current directory as fallback
+    load_dotenv()
+
+
+class ConfigurationError(Exception):
+    """Raised when required configuration is missing or invalid."""
+    pass
+
+
+def get_env_variable(var_name: str, required: bool = True, default: Optional[str] = None) -> str:
+    """
+    Get environment variable with validation.
+
+    Args:
+        var_name: Name of environment variable
+        required: Whether this variable is required
+        default: Default value if not required and not found
+
+    Returns:
+        Value of environment variable
+
+    Raises:
+        ConfigurationError: If required variable is missing
+    """
+    value = os.getenv(var_name)
+
+    if value is None or value.strip() == "":
+        if required:
+            raise ConfigurationError(
+                f"Required environment variable '{var_name}' is not set. "
+                f"Please add it to your .env file."
+            )
+        return default
+
+    return value.strip()
+
 
 # ==================================
-# File Paths (Input / Output Locations)
+# API Keys (Required)
 # ==================================
-SOURCE_PDF_PATH1="data/ucg23_raw/Uganda_Clinical_Guidelines_2023-part-1.pdf"
-SOURCE_PDF_PATH2="data/ucg23_raw/Uganda_Clinical_Guidelines_2023-part-2.pdf"
-DATABASE_PATH="data/ucg23_rag.db"
+
+try:
+    # LlamaParse API key (for PDF parsing with Anthropic models)
+    LLAMAPARSE_API_KEY = get_env_variable("LLAMAPARSE_API_KEY", required=True)
+
+    # OpenAI API key (for embeddings)
+    OPENAI_API_KEY = get_env_variable("OPENAI_API_KEY", required=True)
+
+    # Claude API key (optional, for LLM-based processing)
+    CLAUDE_API_KEY = get_env_variable("CLAUDE_API_KEY", required=False)
+
+except ConfigurationError as e:
+    print(f"\n❌ Configuration Error: {e}", file=sys.stderr)
+    print("\nPlease ensure your .env file contains all required API keys:", file=sys.stderr)
+    print("  - LLAMAPARSE_API_KEY", file=sys.stderr)
+    print("  - OPENAI_API_KEY", file=sys.stderr)
+    print("  - CLAUDE_API_KEY (optional)", file=sys.stderr)
+    sys.exit(1)
+
+
+# ==================================
+# Model Configuration
+# ==================================
+
+# Embedding model settings (OpenAI text-embedding-3-small)
+EMBEDDING_MODEL_NAME = "text-embedding-3-small"
+EMBEDDING_DIMENSION = 1536  # Fixed dimension for text-embedding-3-small
+
+# IMPORTANT: Changing embedding model requires regenerating entire vector table
+# per requirements section 3.3
+
+
+# ==================================
+# Token Limits (from requirements)
+# ==================================
+
+# Child chunk settings (retrieval units)
+CHILD_TOKEN_TARGET = 256  # Target size for child chunks
+CHILD_TOKEN_TOLERANCE = 0.10  # ±10% tolerance
+CHILD_TOKEN_HARD_MAX = 512  # Hard maximum (never exceed)
+
+# Parent chunk settings (context for LLM)
+PARENT_TOKEN_TARGET = 1500  # Target size for parent chunks
+PARENT_TOKEN_MIN = 1000  # Minimum preferred size
+PARENT_TOKEN_HARD_MAX = 2000  # Hard maximum (never exceed)
+
+# Token encoding (all tokenization uses tiktoken cl100k_base)
+TOKEN_ENCODING = "cl100k_base"
+
+
+# ==================================
+# Batch Processing Parameters
+# ==================================
+
+# From requirements section 7.1 (Transaction boundaries)
+
+# Step 1 (Parsing): Batch per N blocks
+PARSING_BATCH_SIZE = 100
+
+# Step 3-4 (Cleanup/Tables): Batch per N sections
+CLEANUP_BATCH_SIZE = 10
+TABLE_BATCH_SIZE = 10
+
+# Step 6 (Embeddings): Batch per N chunks
+EMBEDDING_BATCH_SIZE = 100
+
+# Retry settings for API calls
+MAX_API_RETRIES = 3
+API_RETRY_INITIAL_BACKOFF = 2  # seconds
+
+
+# ==================================
+# Table Conversion Thresholds
+# ==================================
+
+# From requirements section 5.5
+# Large tables (>50 rows or >10 columns) are handled differently
+LARGE_TABLE_ROW_THRESHOLD = 50
+LARGE_TABLE_COL_THRESHOLD = 10
+
+
+# ==================================
+# File Paths
+# ==================================
+
+# Project root directory
+PROJECT_ROOT = Path(__file__).parent.parent
+
+# Source PDF files (manually split at chapter 14 due to 700-page LlamaParse limit)
+SOURCE_PDF_PATH1 = PROJECT_ROOT / "data" / "ugc23_raw" / "Uganda_Clinical_Guidelines_2023-part-1.pdf"
+SOURCE_PDF_PATH2 = PROJECT_ROOT / "data" / "ugc23_raw" / "Uganda_Clinical_Guidelines_2023-part-2.pdf"
+
+# Output database
+DATABASE_PATH = PROJECT_ROOT / "data" / "ucg23_rag.db"
+
+# Intermediate processing directories
+INTERMEDIATE_DIR = PROJECT_ROOT / "data" / "intermediate"
+EXPORTS_DIR = PROJECT_ROOT / "data" / "exports"
+QA_REPORTS_DIR = PROJECT_ROOT / "data" / "qa_reports"
+
+# Logging directory
+LOGS_DIR = PROJECT_ROOT / "logs"
+
+
+# ==================================
+# LlamaParse Configuration
+# ==================================
+
+# From requirements section 5.2.1
+# These are the exact settings required for UCG-23 parsing
+
+LLAMAPARSE_CONFIG = {
+    "api_key": LLAMAPARSE_API_KEY,
+    "max_pages": 700,  # UCG must be split into two parts
+    "parse_mode": "parse_document_with_agent",
+    "model": "anthropic-sonnet-4.0",  # Use Anthropic Sonnet 4.0 for parsing
+    "high_res_ocr": True,
+    "adaptive_long_table": True,
+    "outlined_table_extraction": True,
+    "output_tables_as_HTML": True,
+    "precise_bounding_box": True,
+    "merge_tables_across_pages_in_markdown": True,
+    "page_separator": "\n \n",
+    "bbox_top": 0,
+    "bbox_left": 0,
+    "hide_headers": True,
+    "hide_footers": True,
+    "replace_failed_page_mode": "raw_text",
+    "extract_printed_page_number": True,
+}
+
+
+# ==================================
+# QA Validation Settings
+# ==================================
+
+# From requirements section 5.8.2 (Statistical validation requirements)
+
+# Percentage of diseases to sample for full accuracy review
+QA_DISEASE_SAMPLE_PERCENTAGE = 0.20  # 20%
+
+# Sections that require 100% validation
+QA_EMERGENCY_PROTOCOLS_REQUIRED = True  # 100% validation
+QA_VACCINE_SCHEDULES_REQUIRED = True  # 100% validation
+
+
+# ==================================
+# Logging Configuration
+# ==================================
+
+# Log level
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+
+# Log format
+LOG_FORMAT = "{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} | {message}"
+
+# Log file rotation
+LOG_ROTATION = "100 MB"
+LOG_RETENTION = "30 days"
+
+
+# ==================================
+# Validation on Import
+# ==================================
+
+def validate_configuration():
+    """
+    Validate configuration on module import.
+
+    Checks:
+    - API keys are present
+    - File paths are valid
+    - Numeric values are in valid ranges
+    - Required directories exist or can be created
+
+    Raises:
+        ConfigurationError: If configuration is invalid
+    """
+    errors = []
+
+    # Validate API keys (already checked above, but verify not empty)
+    if not LLAMAPARSE_API_KEY:
+        errors.append("LLAMAPARSE_API_KEY is empty")
+    if not OPENAI_API_KEY:
+        errors.append("OPENAI_API_KEY is empty")
+
+    # Validate token limits
+    if CHILD_TOKEN_TARGET <= 0:
+        errors.append(f"CHILD_TOKEN_TARGET must be positive, got {CHILD_TOKEN_TARGET}")
+    if CHILD_TOKEN_HARD_MAX <= CHILD_TOKEN_TARGET:
+        errors.append(
+            f"CHILD_TOKEN_HARD_MAX ({CHILD_TOKEN_HARD_MAX}) must be greater than "
+            f"CHILD_TOKEN_TARGET ({CHILD_TOKEN_TARGET})"
+        )
+    if PARENT_TOKEN_HARD_MAX <= PARENT_TOKEN_TARGET:
+        errors.append(
+            f"PARENT_TOKEN_HARD_MAX ({PARENT_TOKEN_HARD_MAX}) must be greater than "
+            f"PARENT_TOKEN_TARGET ({PARENT_TOKEN_TARGET})"
+        )
+
+    # Validate batch sizes
+    if PARSING_BATCH_SIZE <= 0:
+        errors.append(f"PARSING_BATCH_SIZE must be positive, got {PARSING_BATCH_SIZE}")
+    if EMBEDDING_BATCH_SIZE <= 0:
+        errors.append(f"EMBEDDING_BATCH_SIZE must be positive, got {EMBEDDING_BATCH_SIZE}")
+
+    # Validate source PDFs exist
+    if not SOURCE_PDF_PATH1.exists():
+        errors.append(f"Source PDF not found: {SOURCE_PDF_PATH1}")
+    if not SOURCE_PDF_PATH2.exists():
+        errors.append(f"Source PDF not found: {SOURCE_PDF_PATH2}")
+
+    # Create required directories if they don't exist
+    for directory in [INTERMEDIATE_DIR, EXPORTS_DIR, QA_REPORTS_DIR, LOGS_DIR]:
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            errors.append(f"Cannot create directory {directory}: {e}")
+
+    if errors:
+        error_msg = "Configuration validation failed:\n" + "\n".join(f"  - {err}" for err in errors)
+        raise ConfigurationError(error_msg)
+
+
+# Run validation on import
+try:
+    validate_configuration()
+except ConfigurationError as e:
+    print(f"\n❌ {e}", file=sys.stderr)
+    sys.exit(1)
+
+
+# ==================================
+# Helper Functions
+# ==================================
+
+def get_child_chunk_range() -> tuple[int, int]:
+    """
+    Get valid token range for child chunks.
+
+    Returns:
+        Tuple of (min_tokens, max_tokens)
+    """
+    tolerance_tokens = int(CHILD_TOKEN_TARGET * CHILD_TOKEN_TOLERANCE)
+    min_tokens = CHILD_TOKEN_TARGET - tolerance_tokens
+    max_tokens = min(CHILD_TOKEN_TARGET + tolerance_tokens, CHILD_TOKEN_HARD_MAX)
+    return (min_tokens, max_tokens)
+
+
+def get_parent_chunk_range() -> tuple[int, int]:
+    """
+    Get valid token range for parent chunks.
+
+    Returns:
+        Tuple of (min_tokens, max_tokens)
+    """
+    return (PARENT_TOKEN_MIN, PARENT_TOKEN_HARD_MAX)
+
+
+def print_configuration():
+    """Print current configuration (for debugging)."""
+    print("\n" + "=" * 80)
+    print("UCG-23 RAG ETL Pipeline Configuration")
+    print("=" * 80)
+    print(f"\nAPI Keys:")
+    print(f"  LLAMAPARSE_API_KEY: {'✓ Set' if LLAMAPARSE_API_KEY else '✗ Missing'}")
+    print(f"  OPENAI_API_KEY: {'✓ Set' if OPENAI_API_KEY else '✗ Missing'}")
+    print(f"  CLAUDE_API_KEY: {'✓ Set' if CLAUDE_API_KEY else '- Not set (optional)'}")
+    print(f"\nModel Configuration:")
+    print(f"  Embedding Model: {EMBEDDING_MODEL_NAME}")
+    print(f"  Embedding Dimension: {EMBEDDING_DIMENSION}")
+    print(f"\nToken Limits:")
+    print(f"  Child chunks: target={CHILD_TOKEN_TARGET}, max={CHILD_TOKEN_HARD_MAX}")
+    print(f"  Parent chunks: target={PARENT_TOKEN_TARGET}, max={PARENT_TOKEN_HARD_MAX}")
+    print(f"\nBatch Sizes:")
+    print(f"  Parsing: {PARSING_BATCH_SIZE} blocks")
+    print(f"  Cleanup/Tables: {CLEANUP_BATCH_SIZE}/{TABLE_BATCH_SIZE} sections")
+    print(f"  Embeddings: {EMBEDDING_BATCH_SIZE} chunks")
+    print(f"\nFile Paths:")
+    print(f"  Source PDF 1: {SOURCE_PDF_PATH1.name} ({'exists' if SOURCE_PDF_PATH1.exists() else 'missing'})")
+    print(f"  Source PDF 2: {SOURCE_PDF_PATH2.name} ({'exists' if SOURCE_PDF_PATH2.exists() else 'missing'})")
+    print(f"  Database: {DATABASE_PATH}")
+    print(f"\nDirectories:")
+    print(f"  Intermediate: {INTERMEDIATE_DIR}")
+    print(f"  Exports: {EXPORTS_DIR}")
+    print(f"  QA Reports: {QA_REPORTS_DIR}")
+    print(f"  Logs: {LOGS_DIR}")
+    print("=" * 80 + "\n")
+
+
+# Export all configuration variables
+__all__ = [
+    # API Keys
+    "LLAMAPARSE_API_KEY",
+    "OPENAI_API_KEY",
+    "CLAUDE_API_KEY",
+    # Model settings
+    "EMBEDDING_MODEL_NAME",
+    "EMBEDDING_DIMENSION",
+    "TOKEN_ENCODING",
+    # Token limits
+    "CHILD_TOKEN_TARGET",
+    "CHILD_TOKEN_TOLERANCE",
+    "CHILD_TOKEN_HARD_MAX",
+    "PARENT_TOKEN_TARGET",
+    "PARENT_TOKEN_MIN",
+    "PARENT_TOKEN_HARD_MAX",
+    # Batch settings
+    "PARSING_BATCH_SIZE",
+    "CLEANUP_BATCH_SIZE",
+    "TABLE_BATCH_SIZE",
+    "EMBEDDING_BATCH_SIZE",
+    "MAX_API_RETRIES",
+    "API_RETRY_INITIAL_BACKOFF",
+    # Table settings
+    "LARGE_TABLE_ROW_THRESHOLD",
+    "LARGE_TABLE_COL_THRESHOLD",
+    # File paths
+    "PROJECT_ROOT",
+    "SOURCE_PDF_PATH1",
+    "SOURCE_PDF_PATH2",
+    "DATABASE_PATH",
+    "INTERMEDIATE_DIR",
+    "EXPORTS_DIR",
+    "QA_REPORTS_DIR",
+    "LOGS_DIR",
+    # LlamaParse config
+    "LLAMAPARSE_CONFIG",
+    # QA settings
+    "QA_DISEASE_SAMPLE_PERCENTAGE",
+    "QA_EMERGENCY_PROTOCOLS_REQUIRED",
+    "QA_VACCINE_SCHEDULES_REQUIRED",
+    # Logging
+    "LOG_LEVEL",
+    "LOG_FORMAT",
+    "LOG_ROTATION",
+    "LOG_RETENTION",
+    # Helper functions
+    "get_child_chunk_range",
+    "get_parent_chunk_range",
+    "print_configuration",
+]

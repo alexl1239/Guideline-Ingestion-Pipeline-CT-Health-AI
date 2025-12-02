@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "Bash(find:*)",
-      "Bash(tree:*)"
+      "Bash(tree:*)",
+      "Bash(for file in ./src/utils/*.py)",
+      "Bash(done)",
+      "Bash(python:*)",
+      "Bash(source venv/bin/activate)"
     ],
     "deny": [],
     "ask": []
