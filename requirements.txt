@@ -27,11 +27,11 @@ Jinja2==3.1.6
 jiter==0.12.0
 joblib==1.5.2
 llama-cloud==0.1.44
-llama-cloud-services==0.6.83
-llama-index-core==0.14.8
+llama-cloud-services==0.6.85
+llama-index-core==0.14.9
 llama-index-instrumentation==0.4.2
 llama-index-workflows==2.11.5
-llama-parse==0.6.83
+llama-parse==0.6.85
 loguru==0.7.3
 MarkupSafe==3.0.3
 marshmallow==3.26.1
