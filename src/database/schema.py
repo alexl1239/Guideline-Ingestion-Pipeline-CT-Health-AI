@@ -72,7 +72,7 @@ EMBEDDING_METADATA_INDEXES = [
 ]
 
 
-# Sections table: Hierarchical structure (chapters ’ diseases ’ subsections)
+# Sections table: Hierarchical structure (chapters ï¿½ diseases ï¿½ subsections)
 SECTIONS_TABLE = """
 CREATE TABLE IF NOT EXISTS sections (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -305,35 +305,14 @@ def _load_sqlite_vec(conn: sqlite3.Connection) -> None:
     Raises:
         sqlite3.Error: If extension cannot be loaded
     """
-    # Enable extension loading
+    import sqlite_vec
+    
     conn.enable_load_extension(True)
-
     try:
-        # Try common extension paths
-        extension_paths = [
-            "vec0",  # If in system path
-            "libsqlite_vec0",
-            "./vec0",
-        ]
-
-        loaded = False
-        for ext_path in extension_paths:
-            try:
-                conn.load_extension(ext_path)
-                loaded = True
-                break
-            except sqlite3.Error:
-                continue
-
-        if not loaded:
-            raise sqlite3.Error(
-                "Could not load sqlite-vec extension from any known path. "
-                "Install with: pip install sqlite-vec"
-            )
-
+        sqlite_vec.load(conn)
     finally:
-        # Disable extension loading for security
         conn.enable_load_extension(False)
+
 
 
 def _drop_all_tables(cursor: sqlite3.Cursor) -> None:
@@ -389,7 +368,9 @@ def validate_schema(db_path: Optional[Path] = None) -> bool:
 
     try:
         conn = sqlite3.connect(str(db_path))
+        _load_sqlite_vec(conn)
         cursor = conn.cursor()
+        cursor.execute("PRAGMA foreign_keys = ON;")
 
         # Check for required tables
         cursor.execute("""
@@ -453,7 +434,9 @@ def get_table_stats(db_path: Optional[Path] = None) -> dict:
 
     try:
         conn = sqlite3.connect(str(db_path))
+        _load_sqlite_vec(conn)
         cursor = conn.cursor()
+        cursor.execute("PRAGMA foreign_keys = ON;")
 
         for table in tables:
             try:
@@ -509,7 +492,9 @@ def print_schema_info(db_path: Optional[Path] = None) -> None:
     # Get embedding metadata
     try:
         conn = sqlite3.connect(str(db_path))
+        _load_sqlite_vec(conn)
         cursor = conn.cursor()
+        cursor.execute("PRAGMA foreign_keys = ON;")
 
         cursor.execute("SELECT model_name, dimension, created_at FROM embedding_metadata LIMIT 1;")
         result = cursor.fetchone()
