@@ -6,9 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a production ETL pipeline that converts Uganda Clinical Guidelines 2023 (UCG-23) PDF documents into a single, portable SQLite database with vector search capabilities for offline clinical RAG applications.
 
-**Input**: Two PDF files (split at chapter 14, as LlamaParse has 700-page limit)
-- `data/ugc23_raw/Uganda_Clinical_Guidelines_2023-part-1.pdf` (55 MB)
-- `data/ugc23_raw/Uganda_Clinical_Guidelines_2023-part-2.pdf` (156 MB)
+**Input**: Single PDF file (Docling has no page limit, processes entire document)
+- `data/ugc23_raw/Uganda_Clinical_Guidelines_2023.pdf`
 
 **Output**: `data/ucg23_rag.db` - Single portable SQLite database with `sqlite-vec` embeddings
 
@@ -23,9 +22,10 @@ pip install -r requirements.txt
 ```
 
 **Required API Keys** (configure in `.env`):
-- `LLAMAPARSE_API_KEY`: For LlamaParse cloud parsing (primary parser, requires paid API key)
 - `OPENAI_API_KEY`: For embeddings using `text-embedding-3-small`
 - `CLAUDE_API_KEY`: Optional, for Claude-based processing
+
+**Note**: Docling parser runs fully offline with no API key required.
 
 ## Running the Pipeline
 
@@ -84,36 +84,29 @@ The pipeline is an **8-step sequential ETL process** where each step writes to S
 - **Output**: Document provenance and version tracking
 
 #### Step 1: Parsing
-- **Primary Parser**: LlamaParse with specific configuration (see below)
-- **Fallback Parser**: Marker (for offline/local processing)
-- Inserts parsed blocks into `raw_blocks` table
+- **Parser**: Docling (open-source, offline PDF parser by IBM)
+- Inserts parsed blocks into `raw_blocks` table with Docling's native labels
+- Stores full Docling JSON output in `documents.docling_json` for traceability
 - **Transaction**: Batch transactions per 100 blocks
 - **Validation**: Flag missing critical fields for manual review
 
-**LlamaParse Configuration** (MUST use these exact settings):
-```python
-from llama_parse import LlamaParse
+**Docling Key Features**:
+- **No page limit**: Processes entire UCG-23 PDF in single pass
+- **Fully offline**: No API key or internet connectivity required
+- **Multi-page tables**: Automatically reconstructs tables spanning multiple pages
+- **Layout analysis**: High-quality reading order for multi-column text
+- **Native labels**: Identifies page headers/footers for filtering
+- **OCR support**: Integrates with Tesseract for scanned pages
+- **Bounding boxes**: Provides precise element coordinates
 
-parser = LlamaParse(
-    api_key="<your-api-key>",
-    max_pages=700,
-    parse_mode="parse_document_with_agent",
-    model="anthropic-sonnet-4.0",
-    high_res_ocr=True,
-    adaptive_long_table=True,
-    outlined_table_extraction=True,
-    output_tables_as_HTML=True,
-    precise_bounding_box=True,
-    merge_tables_across_pages_in_markdown=True,
-    page_separator="\\n \\n",
-    bbox_top=0,
-    bbox_left=0,
-    hide_headers=True,
-    hide_footers=True,
-    replace_failed_page_mode="raw_text",
-    extract_printed_page_number=True,
-)
-```
+**Docling Native Block Types**:
+- `section_header` - Headings with hierarchy level (`docling_level`)
+- `text`, `paragraph` - Body text content
+- `table` - Structured table data (with `page_range` for multi-page)
+- `figure` - Images and diagrams
+- `list`, `list_item` - List structures
+- `caption` - Figure/table captions
+- `page_header`, `page_footer` - Running headers/footers (filtered in Step 3)
 
 #### Step 2: Structural Segmentation
 - Reconstruct logical hierarchy: Chapters → Diseases → Subsections
@@ -195,14 +188,14 @@ CRITICAL CONSTRAINTS:
 ## Database Schema Overview
 
 ```
-documents                    # Document provenance and checksums
+documents                    # Document provenance, checksums, and full Docling JSON
 ├── sections                 # Hierarchical structure (chapters → diseases → subsections)
-│   └── raw_blocks          # Parsed blocks from LlamaParse/Marker (auditability)
+│   └── raw_blocks          # Parsed blocks from Docling with native labels (auditability)
 └── parent_chunks           # Complete clinical topics (1000-1500 tokens)
     └── child_chunks        # Retrieval units (256 tokens)
         └── vec_child_chunks # Vector embeddings (sqlite-vec)
 
-embedding_metadata           # Model name, version, dimension for reproducibility
+embedding_metadata           # Model name, version, dimension, Docling version for reproducibility
 ```
 
 **Key Schema Details**:
@@ -259,31 +252,30 @@ PARENT_TOKEN_TARGET = "1500"      # Parent chunks
 
 **Note**: All tokenization uses tiktoken with cl100k_base encoding.
 
-## Parser Abstraction
+## Docling Block Schema
 
-The codebase uses a canonical block schema with validation:
+Docling outputs are stored in `raw_blocks` table with the following structure:
 
-```python
-class CanonicalBlock:
-    REQUIRED_FIELDS = {'type', 'page'}
-    CRITICAL_FIELDS = {'markdown', 'text'}  # At least one required
+**Required Fields**:
+- `block_type`: Docling's native label (section_header, text, table, etc.)
+- `page_number`: Source page from Docling's provenance
+- `text_content` or `markdown_content`: At least one required
 
-    # Attributes: type, text, markdown, page, bbox, element_id, metadata
+**Optional Docling-Specific Fields**:
+- `page_range`: For multi-page elements like tables (e.g., "12-14")
+- `docling_level`: Hierarchy level for section_header elements
+- `bbox`: Bounding box coordinates as JSON
+- `is_continuation`: TRUE for tables continuing from previous page
+- `element_id`: Docling's internal element identifier
 
-    def validate(self):
-        # Check required fields present
-        # Warn if missing critical content fields
-```
-
-Both LlamaParse and Marker must convert to this canonical format before database insertion.
+The full Docling JSON output is preserved in `documents.docling_json` for complete traceability.
 
 ## Key Dependencies
 
-- `llama-parse`: Primary PDF parser (cloud API, paid)
+- `docling`: Open-source PDF parser (offline, no API key required)
 - `openai`: Embedding generation
 - `sqlite-vec`: Vector search extension for SQLite
 - `tiktoken`: Token counting (cl100k_base encoding)
-- `llama-index-core`: Document processing utilities
 - `loguru`: Structured external logging (logs/ directory)
 - `aiosqlite`: Async SQLite operations
 
@@ -293,13 +285,15 @@ Both LlamaParse and Marker must convert to this canonical format before database
 2. **Table LOC Codes**: Pay special attention to Level of Care codes aligned with points without cell splits (page 641/644).
 3. **Embedding Model Lock-in**: The 1536 dimension is schema-fixed. Changing models requires full re-ingestion.
 4. **Parent-Child Pattern**: This is the core RAG architecture - always search children, return parents.
-5. **Manual PDF Split**: UCG must be manually split at chapter 14 before processing due to LlamaParse 700-page limit.
+5. **Docling Multi-Page Tables**: Docling automatically reconstructs tables spanning multiple pages. Check `page_range` field and `is_continuation` flag.
 6. **Incremental Updates**: Schema supports multiple documents; new versions can be added without rebuilding.
+7. **Full Traceability**: Complete Docling output preserved in `documents.docling_json` and `raw_blocks.metadata` for debugging and re-processing.
 
 ## Logging and Auditability
 
 - External logging via loguru to `logs/` directory
-- All raw parsing output preserved in `raw_blocks` table
-- Embedding metadata stored for reproducibility
+- All raw Docling output preserved in `raw_blocks` table with native labels
+- Full Docling JSON stored in `documents.docling_json` for complete traceability
+- Embedding metadata includes Docling version for reproducibility
 - Transaction boundaries enable precise recovery points
 - Manual intervention points flagged in logs for clinical validation

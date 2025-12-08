@@ -6,7 +6,9 @@
       "Bash(for file in ./src/utils/*.py)",
       "Bash(done)",
       "Bash(python:*)",
-      "Bash(source venv/bin/activate)"
+      "Bash(source venv/bin/activate)",
+      "Bash(sqlite3:*)",
+      "Bash(wc:*)"
     ],
     "deny": [],
     "ask": []

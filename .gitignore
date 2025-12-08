@@ -1,6 +1,7 @@
 # Input/ Output files
 data/
 logs/
+Extraction_Process_v3.md
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

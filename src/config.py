@@ -61,9 +61,6 @@ def get_env_variable(var_name: str, required: bool = True, default: Optional[str
 # ==================================
 
 try:
-    # LlamaParse API key (for PDF parsing with Anthropic models)
-    LLAMAPARSE_API_KEY = get_env_variable("LLAMAPARSE_API_KEY", required=True)
-
     # OpenAI API key (for embeddings)
     OPENAI_API_KEY = get_env_variable("OPENAI_API_KEY", required=True)
 
@@ -73,7 +70,6 @@ try:
 except ConfigurationError as e:
     print(f"\n❌ Configuration Error: {e}", file=sys.stderr)
     print("\nPlease ensure your .env file contains all required API keys:", file=sys.stderr)
-    print("  - LLAMAPARSE_API_KEY", file=sys.stderr)
     print("  - OPENAI_API_KEY", file=sys.stderr)
     print("  - CLAUDE_API_KEY (optional)", file=sys.stderr)
     sys.exit(1)
@@ -147,9 +143,8 @@ LARGE_TABLE_COL_THRESHOLD = 10
 # Project root directory
 PROJECT_ROOT = Path(__file__).parent.parent
 
-# Source PDF files (manually split at chapter 14 due to 700-page LlamaParse limit)
-SOURCE_PDF_PATH1 = PROJECT_ROOT / "data" / "ugc23_raw" / "Uganda_Clinical_Guidelines_2023-part-1.pdf"
-SOURCE_PDF_PATH2 = PROJECT_ROOT / "data" / "ugc23_raw" / "Uganda_Clinical_Guidelines_2023-part-2.pdf"
+# Source PDF file (Docling has no page limit, so single file processing)
+SOURCE_PDF_PATH = PROJECT_ROOT / "data" / "ugc23_raw" / "Uganda_Clinical_Guidelines_2023.pdf"
 
 # Output database
 DATABASE_PATH = PROJECT_ROOT / "data" / "ucg23_rag.db"
@@ -164,31 +159,20 @@ LOGS_DIR = PROJECT_ROOT / "logs"
 
 
 # ==================================
-# LlamaParse Configuration
+# Docling Configuration
 # ==================================
 
-# From requirements section 5.2.1
-# These are the exact settings required for UCG-23 parsing
+# Docling version tracking for reproducibility
+# Docling is an open-source, offline PDF parser by IBM
+# Key features: no page limit, local processing, no API key required
+DOCLING_VERSION = "2.0.0"  # Update this when upgrading Docling
 
-LLAMAPARSE_CONFIG = {
-    "api_key": LLAMAPARSE_API_KEY,
-    "max_pages": 700,  # UCG must be split into two parts
-    "parse_mode": "parse_document_with_agent",
-    "model": "anthropic-sonnet-4.0",  # Use Anthropic Sonnet 4.0 for parsing
-    "high_res_ocr": True,
-    "adaptive_long_table": True,
-    "outlined_table_extraction": True,
-    "output_tables_as_HTML": True,
-    "precise_bounding_box": True,
-    "merge_tables_across_pages_in_markdown": True,
-    "page_separator": "\n \n",
-    "bbox_top": 0,
-    "bbox_left": 0,
-    "hide_headers": True,
-    "hide_footers": True,
-    "replace_failed_page_mode": "raw_text",
-    "extract_printed_page_number": True,
-}
+# Docling configuration notes:
+# - Full document processing in single pass (no page limit)
+# - OCR support via Tesseract for scanned pages
+# - Automatic multi-page table reconstruction
+# - High-quality layout analysis for accurate reading order
+# - Native identification of page headers/footers for filtering
 
 
 # ==================================
@@ -240,8 +224,6 @@ def validate_configuration():
     errors = []
 
     # Validate API keys (already checked above, but verify not empty)
-    if not LLAMAPARSE_API_KEY:
-        errors.append("LLAMAPARSE_API_KEY is empty")
     if not OPENAI_API_KEY:
         errors.append("OPENAI_API_KEY is empty")
 
@@ -265,11 +247,9 @@ def validate_configuration():
     if EMBEDDING_BATCH_SIZE <= 0:
         errors.append(f"EMBEDDING_BATCH_SIZE must be positive, got {EMBEDDING_BATCH_SIZE}")
 
-    # Validate source PDFs exist
-    if not SOURCE_PDF_PATH1.exists():
-        errors.append(f"Source PDF not found: {SOURCE_PDF_PATH1}")
-    if not SOURCE_PDF_PATH2.exists():
-        errors.append(f"Source PDF not found: {SOURCE_PDF_PATH2}")
+    # Validate source PDF exists
+    if not SOURCE_PDF_PATH.exists():
+        errors.append(f"Source PDF not found: {SOURCE_PDF_PATH}")
 
     # Create required directories if they don't exist
     for directory in [INTERMEDIATE_DIR, EXPORTS_DIR, QA_REPORTS_DIR, LOGS_DIR]:
@@ -324,9 +304,11 @@ def print_configuration():
     print("UCG-23 RAG ETL Pipeline Configuration")
     print("=" * 80)
     print(f"\nAPI Keys:")
-    print(f"  LLAMAPARSE_API_KEY: {'✓ Set' if LLAMAPARSE_API_KEY else '✗ Missing'}")
     print(f"  OPENAI_API_KEY: {'✓ Set' if OPENAI_API_KEY else '✗ Missing'}")
     print(f"  CLAUDE_API_KEY: {'✓ Set' if CLAUDE_API_KEY else '- Not set (optional)'}")
+    print(f"\nParsing Configuration:")
+    print(f"  Parser: Docling (offline, open-source)")
+    print(f"  Docling Version: {DOCLING_VERSION}")
     print(f"\nModel Configuration:")
     print(f"  Embedding Model: {EMBEDDING_MODEL_NAME}")
     print(f"  Embedding Dimension: {EMBEDDING_DIMENSION}")
@@ -338,8 +320,7 @@ def print_configuration():
     print(f"  Cleanup/Tables: {CLEANUP_BATCH_SIZE}/{TABLE_BATCH_SIZE} sections")
     print(f"  Embeddings: {EMBEDDING_BATCH_SIZE} chunks")
     print(f"\nFile Paths:")
-    print(f"  Source PDF 1: {SOURCE_PDF_PATH1.name} ({'exists' if SOURCE_PDF_PATH1.exists() else 'missing'})")
-    print(f"  Source PDF 2: {SOURCE_PDF_PATH2.name} ({'exists' if SOURCE_PDF_PATH2.exists() else 'missing'})")
+    print(f"  Source PDF: {SOURCE_PDF_PATH.name} ({'exists' if SOURCE_PDF_PATH.exists() else 'missing'})")
     print(f"  Database: {DATABASE_PATH}")
     print(f"\nDirectories:")
     print(f"  Intermediate: {INTERMEDIATE_DIR}")
@@ -352,7 +333,6 @@ def print_configuration():
 # Export all configuration variables
 __all__ = [
     # API Keys
-    "LLAMAPARSE_API_KEY",
     "OPENAI_API_KEY",
     "CLAUDE_API_KEY",
     # Model settings
@@ -378,15 +358,14 @@ __all__ = [
     "LARGE_TABLE_COL_THRESHOLD",
     # File paths
     "PROJECT_ROOT",
-    "SOURCE_PDF_PATH1",
-    "SOURCE_PDF_PATH2",
+    "SOURCE_PDF_PATH",
     "DATABASE_PATH",
     "INTERMEDIATE_DIR",
     "EXPORTS_DIR",
     "QA_REPORTS_DIR",
     "LOGS_DIR",
-    # LlamaParse config
-    "LLAMAPARSE_CONFIG",
+    # Docling config
+    "DOCLING_VERSION",
     # QA settings
     "QA_DISEASE_SAMPLE_PERCENTAGE",
     "QA_EMERGENCY_PROTOCOLS_REQUIRED",

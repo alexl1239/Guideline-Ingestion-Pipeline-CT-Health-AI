@@ -4,7 +4,7 @@ Database Schema Module for UCG-23 RAG ETL Pipeline
 Defines the complete SQLite database schema including:
 - Document registration and provenance tracking
 - Hierarchical section structure (chapters, diseases, subsections)
-- Raw parsed blocks for auditability
+- Raw parsed blocks from Docling for auditability
 - Parent and child chunks for RAG retrieval
 - Vector embeddings using sqlite-vec extension
 
@@ -20,6 +20,7 @@ from src.config import (
     DATABASE_PATH,
     EMBEDDING_MODEL_NAME,
     EMBEDDING_DIMENSION,
+    DOCLING_VERSION,
 )
 
 
@@ -33,33 +34,34 @@ class SchemaError(Exception):
 # ==================================
 
 # Documents table: Source PDF provenance and checksums
+# Stores full Docling JSON output for traceability and re-processing
 DOCUMENTS_TABLE = """
 CREATE TABLE IF NOT EXISTS documents (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     filename TEXT NOT NULL,
     file_hash TEXT NOT NULL UNIQUE,
-    part_number INTEGER NOT NULL,
     total_pages INTEGER,
     file_size_bytes INTEGER,
+    docling_json TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    metadata TEXT DEFAULT '{}',
-    CONSTRAINT unique_part CHECK (part_number IN (1, 2))
+    metadata TEXT DEFAULT '{}'
 );
 """
 
 DOCUMENTS_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_documents_file_hash ON documents(file_hash);",
-    "CREATE INDEX IF NOT EXISTS idx_documents_part_number ON documents(part_number);",
 ]
 
 
 # Embedding metadata: Model configuration for reproducibility
+# Includes Docling version for traceability
 EMBEDDING_METADATA_TABLE = """
 CREATE TABLE IF NOT EXISTS embedding_metadata (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     model_name TEXT NOT NULL,
     model_version TEXT,
     dimension INTEGER NOT NULL,
+    docling_version TEXT,
     token_encoding TEXT DEFAULT 'cl100k_base',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     metadata TEXT DEFAULT '{}',
@@ -98,7 +100,10 @@ SECTIONS_INDEXES = [
 ]
 
 
-# Raw blocks table: Parsed content from LlamaParse/Marker (auditability)
+# Raw blocks table: Parsed content from Docling (auditability)
+# Stores Docling's native element labels and hierarchy information
+# Block types from Docling: 'section_header', 'text', 'paragraph', 'table',
+# 'figure', 'list', 'list_item', 'caption', 'page_header', 'page_footer'
 RAW_BLOCKS_TABLE = """
 CREATE TABLE IF NOT EXISTS raw_blocks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -107,7 +112,10 @@ CREATE TABLE IF NOT EXISTS raw_blocks (
     text_content TEXT,
     markdown_content TEXT,
     page_number INTEGER NOT NULL,
+    page_range TEXT,
+    docling_level INTEGER,
     bbox TEXT,
+    is_continuation BOOLEAN DEFAULT FALSE,
     element_id TEXT,
     metadata TEXT DEFAULT '{}',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -271,11 +279,11 @@ def create_schema(db_path: Optional[Path] = None, force_recreate: bool = False) 
             logger.info("Creating vec_child_chunks virtual table...")
             cursor.execute(VEC_CHILD_CHUNKS_TABLE)
 
-            # Insert initial embedding metadata record
+            # Insert initial embedding metadata record with Docling version
             cursor.execute("""
-                INSERT OR IGNORE INTO embedding_metadata (model_name, model_version, dimension)
-                VALUES (?, ?, ?)
-            """, (EMBEDDING_MODEL_NAME, "v1.0", EMBEDDING_DIMENSION))
+                INSERT OR IGNORE INTO embedding_metadata (model_name, model_version, dimension, docling_version)
+                VALUES (?, ?, ?, ?)
+            """, (EMBEDDING_MODEL_NAME, "v1.0", EMBEDDING_DIMENSION, DOCLING_VERSION))
 
             # Commit transaction
             conn.commit()
