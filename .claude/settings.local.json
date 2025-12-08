@@ -8,7 +8,8 @@
       "Bash(python:*)",
       "Bash(source venv/bin/activate)",
       "Bash(sqlite3:*)",
-      "Bash(wc:*)"
+      "Bash(wc:*)",
+      "Bash(cat:*)"
     ],
     "deny": [],
     "ask": []
