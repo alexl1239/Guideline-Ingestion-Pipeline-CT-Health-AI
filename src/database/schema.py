@@ -34,22 +34,22 @@ class SchemaError(Exception):
 # ==================================
 
 # Documents table: Source PDF provenance and checksums
-# Stores full Docling JSON output for traceability and re-processing
+# Stores full PDF bytes and Docling JSON output for self-contained database
 DOCUMENTS_TABLE = """
 CREATE TABLE IF NOT EXISTS documents (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    filename TEXT NOT NULL,
-    file_hash TEXT NOT NULL UNIQUE,
-    total_pages INTEGER,
-    file_size_bytes INTEGER,
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    version_label TEXT,
+    source_url TEXT,
+    checksum_sha256 TEXT NOT NULL UNIQUE,
+    pdf_bytes BLOB,
     docling_json TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    metadata TEXT DEFAULT '{}'
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 """
 
 DOCUMENTS_INDEXES = [
-    "CREATE INDEX IF NOT EXISTS idx_documents_file_hash ON documents(file_hash);",
+    "CREATE INDEX IF NOT EXISTS idx_documents_checksum ON documents(checksum_sha256);",
 ]
 
 
@@ -59,12 +59,9 @@ EMBEDDING_METADATA_TABLE = """
 CREATE TABLE IF NOT EXISTS embedding_metadata (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     model_name TEXT NOT NULL,
-    model_version TEXT,
     dimension INTEGER NOT NULL,
     docling_version TEXT,
-    token_encoding TEXT DEFAULT 'cl100k_base',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    metadata TEXT DEFAULT '{}',
     CONSTRAINT valid_dimension CHECK (dimension > 0)
 );
 """
@@ -279,11 +276,8 @@ def create_schema(db_path: Optional[Path] = None, force_recreate: bool = False) 
             logger.info("Creating vec_child_chunks virtual table...")
             cursor.execute(VEC_CHILD_CHUNKS_TABLE)
 
-            # Insert initial embedding metadata record with Docling version
-            cursor.execute("""
-                INSERT OR IGNORE INTO embedding_metadata (model_name, model_version, dimension, docling_version)
-                VALUES (?, ?, ?, ?)
-            """, (EMBEDDING_MODEL_NAME, "v1.0", EMBEDDING_DIMENSION, DOCLING_VERSION))
+            # Note: embedding_metadata will be populated by Step 0 during document registration
+            # No initial record inserted here to avoid duplication
 
             # Commit transaction
             conn.commit()
