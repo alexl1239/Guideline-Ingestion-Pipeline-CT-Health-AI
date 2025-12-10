@@ -9,7 +9,11 @@
       "Bash(source venv/bin/activate)",
       "Bash(sqlite3:*)",
       "Bash(wc:*)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(rm:*)",
+      "Bash(grep:*)",
+      "Bash(ls:*)",
+      "Bash(PYTHONPATH=/Users/siddharthmanne/Projects/ugc23-rag-etl-pipeline/src python:*)"
     ],
     "deny": [],
     "ask": []

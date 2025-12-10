@@ -10,10 +10,12 @@ import sqlite3
 from pathlib import Path
 from typing import Optional
 
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-from config import DATABASE_PATH
-from utils.logging_config import logger
+# Add project root to path for proper module resolution
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+
+from src.config import DATABASE_PATH
+from src.utils.logging_config import setup_logger, logger
 
 
 def inspect_database(db_path: Optional[str] = None):
@@ -27,111 +29,87 @@ def inspect_database(db_path: Optional[str] = None):
         db_path = DATABASE_PATH
 
     if not Path(db_path).exists():
-        logger.error(f"Database file not found: {db_path}")
-        print(f"Database not found: {db_path}")
+        logger.error(f"Database not found: {db_path}")
         return
 
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    logger.info("=" * 80)
+    logger.info("UCG-23 RAG DATABASE INSPECTION")
+    logger.info("=" * 80)
+    logger.info(f"Database: {db_path}")
+    logger.info(f"Size: {Path(db_path).stat().st_size / (1024*1024):.2f} MB")
+    logger.info("")
+
+    # Documents
+    logger.info("DOCUMENTS:")
+    cursor.execute("SELECT id, title, version_label, checksum_sha256, created_at FROM documents")
+    for row in cursor.fetchall():
+        logger.info(f"  ID: {row[0]}")
+        logger.info(f"  Title: {row[1]}")
+        logger.info(f"  Version: {row[2]}")
+        logger.info(f"  Checksum: {row[3][:16]}...")
+        logger.info(f"  Created: {row[4]}")
+    logger.info("")
+
+    # Sections by level
+    logger.info("SECTIONS BY LEVEL:")
+    cursor.execute("""
+        SELECT level, COUNT(*) as count
+        FROM sections
+        GROUP BY level
+        ORDER BY level
+    """)
+    for row in cursor.fetchall():
+        level_name = {1: "Chapters", 2: "Diseases/Topics", 3: "Subsections"}.get(row[0], f"Level {row[0]}")
+        logger.info(f"  {level_name}: {row[1]}")
+    logger.info("")
+
+    # Sample sections
+    logger.info("SAMPLE SECTIONS:")
+    cursor.execute("""
+        SELECT level, heading, heading_path
+        FROM sections
+        ORDER BY order_index
+        LIMIT 10
+    """)
+    for row in cursor.fetchall():
+        indent = "  " * row[0]
+        logger.info(f"{indent}[L{row[0]}] {row[1]}")
+    logger.info("")
+
+    # Chunks
+    logger.info("CHUNKS:")
+    cursor.execute("SELECT COUNT(*) FROM parent_chunks")
+    parent_count = cursor.fetchone()[0]
+    logger.info(f"  Parent chunks: {parent_count}")
+
+    cursor.execute("""
+        SELECT AVG(token_count), MIN(token_count), MAX(token_count)
+        FROM parent_chunks
+    """)
+    avg, min_val, max_val = cursor.fetchone()
+    logger.info(f"    Token stats: avg={avg:.1f}, min={min_val}, max={max_val}")
+
+    cursor.execute("SELECT COUNT(*) FROM child_chunks")
+    child_count = cursor.fetchone()[0]
+    logger.info(f"  Child chunks: {child_count}")
+
+    cursor.execute("""
+        SELECT AVG(token_count), MIN(token_count), MAX(token_count)
+        FROM child_chunks
+    """)
+    avg, min_val, max_val = cursor.fetchone()
+    logger.info(f"    Token stats: avg={avg:.1f}, min={min_val}, max={max_val}")
+    logger.info("")
+
+    # Embeddings
+    logger.info("EMBEDDINGS:")
     try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-
-        print("=" * 80)
-        print("UCG-23 RAG DATABASE INSPECTION")
-        print("=" * 80)
-        print(f"Database: {db_path}")
-        print(f"Size: {Path(db_path).stat().st_size / (1024*1024):.2f} MB")
-        print()
-
-        # Documents
-        print("DOCUMENTS:")
-        cursor.execute("SELECT id, title, version_label, checksum_sha256, created_at FROM documents")
-        for row in cursor.fetchall():
-            print(f"  ID: {row[0]}")
-            print(f"  Title: {row[1]}")
-            print(f"  Version: {row[2]}")
-            print(f"  Checksum: {row[3][:16]}...")
-            print(f"  Created: {row[4]}")
-        print()
-
-        # Sections by level
-        print("SECTIONS BY LEVEL:")
-        cursor.execute("""
-            SELECT level, COUNT(*) as count
-            FROM sections
-            GROUP BY level
-            ORDER BY level
-        """)
-        for row in cursor.fetchall():
-            level_name = {1: "Chapters", 2: "Diseases/Topics", 3: "Subsections"}.get(row[0], f"Level {row[0]}")
-            print(f"  {level_name}: {row[1]}")
-        print()
-
-        # Sample sections
-        print("SAMPLE SECTIONS:")
-        cursor.execute("""
-            SELECT level, heading, heading_path
-            FROM sections
-            ORDER BY order_index
-            LIMIT 10
-        """)
-        for row in cursor.fetchall():
-            indent = "  " * row[0]
-            print(f"{indent}[L{row[0]}] {row[1]}")
-        print()
-
-        # Chunks
-        print("CHUNKS:")
-        cursor.execute("SELECT COUNT(*) FROM parent_chunks")
-        parent_count = cursor.fetchone()[0]
-        print(f"  Parent chunks: {parent_count}")
-
-        cursor.execute("""
-            SELECT AVG(token_count), MIN(token_count), MAX(token_count)
-            FROM parent_chunks
-        """)
-        avg, min_val, max_val = cursor.fetchone()
-        print(f"    Token stats: avg={avg:.1f}, min={min_val}, max={max_val}")
-
-        cursor.execute("SELECT COUNT(*) FROM child_chunks")
-        child_count = cursor.fetchone()[0]
-        print(f"  Child chunks: {child_count}")
-
-        cursor.execute("""
-            SELECT AVG(token_count), MIN(token_count), MAX(token_count)
-            FROM child_chunks
-        """)
-        avg, min_val, max_val = cursor.fetchone()
-        print(f"    Token stats: avg={avg:.1f}, min={min_val}, max={max_val}")
-        print()
-
-        # Embeddings
-        print("EMBEDDINGS:")
-        try:
-            cursor.execute("SELECT COUNT(*) FROM vec_child_chunks")
-            embedding_count = cursor.fetchone()[0]
-            print(f"  Embedded chunks: {embedding_count}")
-
-            cursor.execute("""
-                SELECT model_name, dimension, created_at
-                FROM embedding_metadata
-                ORDER BY created_at DESC
-                LIMIT 1
-            """)
-            model_info = cursor.fetchone()
-            if model_info:
-                print(f"  Model: {model_info[0]}")
-                print(f"  Dimension: {model_info[1]}")
-                print(f"  Created: {model_info[2]}")
-        except sqlite3.OperationalError:
-            logger.warning("Embeddings table not found in database")
-            print("  No embeddings table found")
-        print()
-
-        # Raw blocks
-        print("RAW BLOCKS:")
-        cursor.execute("SELECT COUNT(*) FROM raw_blocks")
-        block_count = cursor.fetchone()[0]
-        print(f"  Total blocks: {block_count}")
+        cursor.execute("SELECT COUNT(*) FROM vec_child_chunks")
+        embedding_count = cursor.fetchone()[0]
+        logger.info(f"  Embedded chunks: {embedding_count}")
 
         cursor.execute("""
             SELECT block_type, COUNT(*) as count
@@ -139,26 +117,42 @@ def inspect_database(db_path: Optional[str] = None):
             GROUP BY block_type
             ORDER BY count DESC
         """)
-        print("  By type:")
-        for row in cursor.fetchall():
-            print(f"    {row[0]}: {row[1]}")
+        model_info = cursor.fetchone()
+        if model_info:
+            logger.info(f"  Model: {model_info[0]}")
+            logger.info(f"  Dimension: {model_info[1]}")
+            logger.info(f"  Created: {model_info[2]}")
+    except sqlite3.OperationalError:
+        logger.warning("  No embeddings table found")
+    logger.info("")
 
-        print("=" * 80)
+    # Raw blocks
+    logger.info("RAW BLOCKS:")
+    cursor.execute("SELECT COUNT(*) FROM raw_blocks")
+    block_count = cursor.fetchone()[0]
+    logger.info(f"  Total blocks: {block_count}")
 
-    except sqlite3.Error as e:
-        logger.error(f"Database error during inspection: {e}")
-        print(f"\n❌ Error inspecting database: {e}", file=sys.stderr)
-    except Exception as e:
-        logger.error(f"Unexpected error during inspection: {e}")
-        print(f"\n❌ Unexpected error: {e}", file=sys.stderr)
-    finally:
-        if 'conn' in locals():
-            conn.close()
+    cursor.execute("""
+        SELECT block_type, COUNT(*) as count
+        FROM raw_blocks
+        GROUP BY block_type
+        ORDER BY count DESC
+    """)
+    logger.info("  By type:")
+    for row in cursor.fetchall():
+        logger.info(f"    {row[0]}: {row[1]}")
+
+    logger.info("=" * 80)
+
+    conn.close()
 
 
 def main():
     """Run database inspection."""
     import argparse
+
+    # Initialize logging
+    setup_logger()
 
     parser = argparse.ArgumentParser(description="Inspect UCG-23 RAG database")
     parser.add_argument("--db", type=str, help="Path to database (optional)")
