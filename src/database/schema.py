@@ -14,7 +14,6 @@ Transaction boundaries are enforced at the pipeline step level.
 import sqlite3
 from pathlib import Path
 from typing import Optional
-from loguru import logger
 
 from src.config import (
     DATABASE_PATH,
@@ -22,6 +21,7 @@ from src.config import (
     EMBEDDING_DIMENSION,
     DOCLING_VERSION,
 )
+from src.utils.logging_config import logger
 
 
 class SchemaError(Exception):
