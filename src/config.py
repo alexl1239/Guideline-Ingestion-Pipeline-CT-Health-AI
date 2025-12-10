@@ -12,6 +12,9 @@ from pathlib import Path
 from typing import Optional
 from dotenv import load_dotenv
 
+# Note: Logger will be configured by setup_logger() in logging_config
+# Import is deferred to avoid circular dependency during config loading
+
 
 # Load environment variables from .env file
 # Look for .env in the project root (parent of src/)
@@ -68,8 +71,8 @@ try:
     CLAUDE_API_KEY = get_env_variable("CLAUDE_API_KEY", required=False)
 
 except ConfigurationError as e:
-    # Note: Cannot use logger here as logging_config depends on this module
-    # Use stderr directly for configuration errors at import time
+    # Note: Using print() here because this runs during module import,
+    # before logging is configured. Logging setup depends on config being loaded first.
     print(f"\n❌ Configuration Error: {e}", file=sys.stderr)
     print("\nPlease ensure your .env file contains all required API keys:", file=sys.stderr)
     print("  - OPENAI_API_KEY", file=sys.stderr)
@@ -196,15 +199,11 @@ QA_VACCINE_SCHEDULES_REQUIRED = True  # 100% validation
 # Logging Configuration
 # ==================================
 
-# Log level
+# Log level (used by logging_config.py)
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
-# Log format
-LOG_FORMAT = "{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} | {message}"
-
-# Log file rotation
-LOG_ROTATION = "100 MB"
-LOG_RETENTION = "30 days"
+# Note: Log format, rotation, and retention are configured in src/utils/logging_config.py
+# to avoid redundancy and maintain a single source of truth for logging setup.
 
 
 # ==================================
@@ -270,8 +269,8 @@ def validate_configuration():
 try:
     validate_configuration()
 except ConfigurationError as e:
-    # Note: Cannot use logger here as logging_config depends on this module
-    # Use stderr directly for configuration errors at import time
+    # Note: Using print() here because this runs during module import,
+    # before logging is configured. Logging setup depends on config being loaded first.
     print(f"\n❌ {e}", file=sys.stderr)
     sys.exit(1)
 
@@ -377,9 +376,6 @@ __all__ = [
     "QA_VACCINE_SCHEDULES_REQUIRED",
     # Logging
     "LOG_LEVEL",
-    "LOG_FORMAT",
-    "LOG_ROTATION",
-    "LOG_RETENTION",
     # Helper functions
     "get_child_chunk_range",
     "get_parent_chunk_range",

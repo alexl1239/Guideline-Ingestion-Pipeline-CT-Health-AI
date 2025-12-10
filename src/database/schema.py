@@ -22,6 +22,7 @@ from src.config import (
     EMBEDDING_DIMENSION,
     DOCLING_VERSION,
 )
+from src.utils.logging_config import logger
 
 
 class SchemaError(Exception):

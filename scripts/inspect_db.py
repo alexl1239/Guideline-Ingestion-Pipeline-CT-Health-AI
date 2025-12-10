@@ -112,10 +112,10 @@ def inspect_database(db_path: Optional[str] = None):
         logger.info(f"  Embedded chunks: {embedding_count}")
 
         cursor.execute("""
-            SELECT model_name, dimension, created_at
-            FROM embedding_metadata
-            ORDER BY created_at DESC
-            LIMIT 1
+            SELECT block_type, COUNT(*) as count
+            FROM raw_blocks
+            GROUP BY block_type
+            ORDER BY count DESC
         """)
         model_info = cursor.fetchone()
         if model_info:
