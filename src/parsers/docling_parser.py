@@ -24,10 +24,10 @@ import json
 from pathlib import Path
 
 from docling.document_converter import DocumentConverter
-from loguru import logger
 
+from src.utils.logging_config import logger
 from src.config import DOCLING_VERSION
-from .base import BaseParser, ParseResult
+from src.parsers.base import BaseParser, ParseResult
 
 
 class DoclingParser(BaseParser):

@@ -68,6 +68,8 @@ try:
     CLAUDE_API_KEY = get_env_variable("CLAUDE_API_KEY", required=False)
 
 except ConfigurationError as e:
+    # Note: Cannot use logger here as logging_config depends on this module
+    # Use stderr directly for configuration errors at import time
     print(f"\n❌ Configuration Error: {e}", file=sys.stderr)
     print("\nPlease ensure your .env file contains all required API keys:", file=sys.stderr)
     print("  - OPENAI_API_KEY", file=sys.stderr)
@@ -268,6 +270,8 @@ def validate_configuration():
 try:
     validate_configuration()
 except ConfigurationError as e:
+    # Note: Cannot use logger here as logging_config depends on this module
+    # Use stderr directly for configuration errors at import time
     print(f"\n❌ {e}", file=sys.stderr)
     sys.exit(1)
 

@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Any
 
-from loguru import logger
+from src.utils.logging_config import logger
 
 
 @dataclass

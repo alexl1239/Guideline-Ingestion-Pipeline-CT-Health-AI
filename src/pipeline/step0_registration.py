@@ -19,8 +19,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional
 
-from loguru import logger
-
+from src.utils.logging_config import logger
 from src.config import (
     DOCLING_VERSION,
     EMBEDDING_MODEL_NAME,
@@ -256,6 +255,10 @@ def run() -> str:
 
 
 if __name__ == "__main__":
+    # Initialize logging when run directly
+    from src.utils.logging_config import setup_logger
+    setup_logger()
+
     try:
         doc_id = run()
         logger.info(f"✓ Step 0 completed successfully. Document ID: {doc_id}")
