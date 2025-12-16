@@ -18,7 +18,7 @@ This is a production ETL pipeline that converts Uganda Clinical Guidelines 2023 
 source venv/bin/activate
 
 # Install dependencies
-pip install -r requirements.txt
+pip install -r requirements.txt````
 ```
 
 **Required API Keys** (configure in `.env`):

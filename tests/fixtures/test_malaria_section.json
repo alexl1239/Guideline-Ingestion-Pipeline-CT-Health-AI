@@ -1,0 +1,52 @@
+{
+  "section": {
+    "id": 1,
+    "document_id": 1,
+    "level": 2,
+    "heading": "1.2 Malaria",
+    "heading_path": "Infectious Diseases > 1.2 Malaria",
+    "order_index": 2,
+    "page_start": 145,
+    "page_end": 148
+  },
+  "parent_chunk": {
+    "id": 1,
+    "section_id": 1,
+    "content": "# 1.2 Malaria\n\n## Definition\nMalaria is an acute febrile illness caused by Plasmodium parasites transmitted through the bite of infected female Anopheles mosquitoes.\n\n## Clinical Features\n- High fever (>38.5°C)\n- Chills and rigors\n- Headache\n- Muscle aches\n- Nausea and vomiting\n- Weakness and fatigue\n\nIn severe cases:\n- Altered consciousness\n- Respiratory distress\n- Severe anemia (Hb <5 g/dL)\n- Hypoglycemia\n- Renal failure\n\n## Investigations\n- Microscopy: Gold standard for malaria diagnosis\n- Rapid Diagnostic Tests (RDTs): For resource-limited settings\n- Full blood count: Check for anemia and thrombocytopenia\n- Blood glucose: Rule out hypoglycemia\n\n## Management\n### Uncomplicated Malaria\n- First-line: Artemether-Lumefantrine (AL) 20/120mg\n  - Weight 5-14kg: 1 tablet twice daily for 3 days\n  - Weight 15-24kg: 2 tablets twice daily for 3 days\n  - Weight 25-34kg: 3 tablets twice daily for 3 days\n  - Weight ≥35kg: 4 tablets twice daily for 3 days\n\n### Severe Malaria\n- Artesunate IV 2.4mg/kg at 0, 12, 24 hours, then daily\n- Or Quinine IV 20mg/kg loading dose over 4 hours\n- Supportive care: IV fluids, glucose monitoring",
+    "token_count": 1247,
+    "page_start": 145,
+    "page_end": 148,
+    "created_at": "2025-01-15T10:00:00Z"
+  },
+  "child_chunks": [
+    {
+      "id": 1,
+      "parent_id": 1,
+      "section_id": 1,
+      "chunk_index": 0,
+      "content": "Section: Infectious Diseases > 1.2 Malaria\n\n# 1.2 Malaria\n\n## Definition\nMalaria is an acute febrile illness caused by Plasmodium parasites transmitted through the bite of infected female Anopheles mosquitoes.\n\n## Clinical Features\n- High fever (>38.5°C)\n- Chills and rigors\n- Headache\n- Muscle aches\n- Nausea and vomiting\n- Weakness and fatigue\n\nIn severe cases:\n- Altered consciousness\n- Respiratory distress\n- Severe anemia (Hb <5 g/dL)\n- Hypoglycemia\n- Renal failure",
+      "token_count": 256,
+      "created_at": "2025-01-15T10:00:00Z"
+    },
+    {
+      "id": 2,
+      "parent_id": 1,
+      "section_id": 1,
+      "chunk_index": 1,
+      "content": "Section: Infectious Diseases > 1.2 Malaria\n\n## Investigations\n- Microscopy: Gold standard for malaria diagnosis\n- Rapid Diagnostic Tests (RDTs): For resource-limited settings\n- Full blood count: Check for anemia and thrombocytopenia\n- Blood glucose: Rule out hypoglycemia\n\n## Management\n### Uncomplicated Malaria\n- First-line: Artemether-Lumefantrine (AL) 20/120mg\n  - Weight 5-14kg: 1 tablet twice daily for 3 days\n  - Weight 15-24kg: 2 tablets twice daily for 3 days\n  - Weight 25-34kg: 3 tablets twice daily for 3 days\n  - Weight ≥35kg: 4 tablets twice daily for 3 days",
+      "token_count": 258,
+      "created_at": "2025-01-15T10:00:00Z"
+    },
+    {
+      "id": 3,
+      "parent_id": 1,
+      "section_id": 1,
+      "chunk_index": 2,
+      "content": "Section: Infectious Diseases > 1.2 Malaria\n\n### Severe Malaria\n- Artesunate IV 2.4mg/kg at 0, 12, 24 hours, then daily\n- Or Quinine IV 20mg/kg loading dose over 4 hours\n- Supportive care: IV fluids, glucose monitoring",
+      "token_count": 245,
+      "created_at": "2025-01-15T10:00:00Z"
+    }
+  ],
+  "expected_embedding_dimension": 1536,
+  "notes": "This fixture demonstrates: 1 parent chunk split into 3 child chunks, each child includes heading context, all link back to parent via parent_id"
+}

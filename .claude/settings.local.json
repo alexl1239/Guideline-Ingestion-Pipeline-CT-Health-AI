@@ -13,7 +13,11 @@
       "Bash(rm:*)",
       "Bash(grep:*)",
       "Bash(ls:*)",
-      "Bash(PYTHONPATH=/Users/siddharthmanne/Projects/ugc23-rag-etl-pipeline/src python:*)"
+      "Bash(PYTHONPATH=/Users/siddharthmanne/Projects/ugc23-rag-etl-pipeline/src python:*)",
+      "Bash(pytest:*)",
+      "Bash(chmod:*)",
+      "Bash(./scripts/test_schema.sh:*)",
+      "Bash(xargs -I {} echo 'Found {} pipeline step files' ls -1 src/pipeline/step*.py)"
     ],
     "deny": [],
     "ask": []

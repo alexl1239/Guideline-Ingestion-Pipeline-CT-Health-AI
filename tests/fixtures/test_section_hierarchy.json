@@ -1,0 +1,59 @@
+{
+  "sections": [
+    {
+      "id": 1,
+      "document_id": 1,
+      "parent_id": null,
+      "level": 1,
+      "heading": "Emergencies and Trauma",
+      "heading_path": "Emergencies and Trauma",
+      "order_index": 1,
+      "page_start": 10,
+      "page_end": 50
+    },
+    {
+      "id": 2,
+      "document_id": 1,
+      "parent_id": 1,
+      "level": 2,
+      "heading": "1.1.1 Anaphylactic Shock",
+      "heading_path": "Emergencies and Trauma > 1.1.1 Anaphylactic Shock",
+      "order_index": 2,
+      "page_start": 10,
+      "page_end": 12
+    },
+    {
+      "id": 3,
+      "document_id": 1,
+      "parent_id": 2,
+      "level": 3,
+      "heading": "Definition",
+      "heading_path": "Emergencies and Trauma > 1.1.1 Anaphylactic Shock > Definition",
+      "order_index": 3,
+      "page_start": 10,
+      "page_end": 10
+    },
+    {
+      "id": 4,
+      "document_id": 1,
+      "parent_id": 2,
+      "level": 3,
+      "heading": "Management",
+      "heading_path": "Emergencies and Trauma > 1.1.1 Anaphylactic Shock > Management",
+      "order_index": 4,
+      "page_start": 11,
+      "page_end": 12
+    },
+    {
+      "id": 5,
+      "document_id": 1,
+      "parent_id": 1,
+      "level": 2,
+      "heading": "1.1.2 Burns",
+      "heading_path": "Emergencies and Trauma > 1.1.2 Burns",
+      "order_index": 5,
+      "page_start": 13,
+      "page_end": 20
+    }
+  ]
+}
