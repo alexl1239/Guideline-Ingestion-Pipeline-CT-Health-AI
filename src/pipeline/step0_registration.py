@@ -16,7 +16,7 @@ Output: Document record in SQLite with metadata
 import hashlib
 import uuid
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Optional
 
 from src.utils.logging_config import logger
@@ -201,7 +201,7 @@ def run() -> str:
                     checksum,
                     pdf_bytes,
                     None,  # Will be populated in Step 1 (Parsing)
-                    datetime.utcnow().isoformat(),
+                    datetime.now(UTC).isoformat(),
                 ),
             )
             logger.success("✓ Document record inserted")
@@ -221,7 +221,7 @@ def run() -> str:
                         EMBEDDING_MODEL_NAME,
                         EMBEDDING_DIMENSION,
                         DOCLING_VERSION,
-                        datetime.utcnow().isoformat(),
+                        datetime.now(UTC).isoformat(),
                     ),
                 )
                 logger.success("✓ Embedding metadata inserted")

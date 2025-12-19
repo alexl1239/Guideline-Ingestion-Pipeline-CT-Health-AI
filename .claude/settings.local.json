@@ -14,7 +14,9 @@
       "Bash(grep:*)",
       "Bash(ls:*)",
       "Bash(PYTHONPATH=/Users/siddharthmanne/Projects/ugc23-rag-etl-pipeline/src python:*)",
-      "Bash(PYTHONPATH=/Users/alexluo/Desktop/GitHub/ugc23-rag-etl-pipeline python:*)"
+      "Bash(PYTHONPATH=/Users/alexluo/Desktop/GitHub/ugc23-rag-etl-pipeline python:*)",
+      "Bash(PYTHONPATH=/Users/alexluo/Desktop/GitHub/ugc23-rag-etl-pipeline sqlite3:*)",
+      "Bash(for f in /Users/alexluo/Desktop/GitHub/ugc23-rag-etl-pipeline/src/pipeline/step*.py)"
     ],
     "deny": [],
     "ask": []
