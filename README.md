@@ -4,8 +4,7 @@ The pipeline converts **UCG-23** from PDF into a **single SQLite database** that
 
 * **Parser-flexible**
 
-  * Primarily uses **LlamaParse** with high-quality configuration
-  * **Marker** serves as the offline/local fallback
+  * Primarily uses **Docling**
 
 * **Clinically accurate**
 

@@ -460,25 +460,6 @@ Each pipeline step has specific transaction batching for resumability:
 
 On failure: rollback current transaction, log error, resume from last successful batch.
 
----
-
-## Current Implementation Status
-
-**Implemented (4 modules)**:
-- src/config.py
-- src/utils/logging_config.py
-- src/database/schema.py
-- src/database/connections.py
-
-**Not Yet Implemented (23 modules)**:
-- All pipeline steps (step0-step8)
-- All utilities (except logging_config)
-- Parser implementations
-- Main orchestrator
-- Query engine
-
----
-
 ## Recommended Implementation Order
 
 **Phase 1: Core Utilities**
