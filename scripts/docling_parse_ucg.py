@@ -17,7 +17,7 @@ sys.path.insert(0, str(project_root))
 
 from src.utils.logging_config import setup_logger, logger
 
-PDF_PATH = Path("data/Uganda_Clinical_Guidelines_2023.pdf")
+PDF_PATH = Path("data/ucg23_raw/Uganda_Clinical_Guidelines_2023.pdf")
 OUT_DIR = Path("data/docling_outputs")
 MARKDOWN_PATH = OUT_DIR / "ucg23_docling.md"
 JSON_PATH = OUT_DIR / "ucg23_docling.json"
