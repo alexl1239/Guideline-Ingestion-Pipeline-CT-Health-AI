@@ -34,12 +34,17 @@ def extract_page_number(element: Dict[str, Any]) -> Optional[int]:
         >>> extract_page_number(element)
         5
     """
-    # Try provenance list first
+    # Try provenance list first (Docling 2.0 uses 'page_no')
     provenance = element.get('prov', [])
     if provenance and isinstance(provenance, list) and len(provenance) > 0:
         first_prov = provenance[0]
-        if isinstance(first_prov, dict) and 'page' in first_prov:
-            return first_prov['page']
+        if isinstance(first_prov, dict):
+            # Docling 2.0 uses 'page_no'
+            if 'page_no' in first_prov:
+                return first_prov['page_no']
+            # Older versions use 'page'
+            if 'page' in first_prov:
+                return first_prov['page']
 
     # Fallback to direct page_no field
     if 'page_no' in element:
@@ -71,11 +76,13 @@ def extract_page_range(element: Dict[str, Any]) -> Optional[str]:
     if not provenance or not isinstance(provenance, list) or len(provenance) <= 1:
         return None
 
-    # Extract all unique page numbers
+    # Extract all unique page numbers (Docling 2.0 uses 'page_no')
     pages = []
     for prov in provenance:
-        if isinstance(prov, dict) and 'page' in prov:
-            pages.append(prov['page'])
+        if isinstance(prov, dict):
+            page_num = prov.get('page_no') or prov.get('page')
+            if page_num is not None:
+                pages.append(page_num)
 
     pages = sorted(set(pages))
 
@@ -145,6 +152,11 @@ def extract_text_content(element: Dict[str, Any]) -> Optional[str]:
     """
     Extract plain text content from Docling element.
 
+    Handles different content types:
+    - Text elements: 'text' or 'orig' field
+    - Tables: Extract from table_cells
+    - Other elements: Fall back to 'text' field
+
     Args:
         element: Docling element dict
 
@@ -156,8 +168,32 @@ def extract_text_content(element: Dict[str, Any]) -> Optional[str]:
         >>> extract_text_content(element)
         'This is the content.'
     """
+    # Try direct text field first
     text = element.get('text', '').strip()
-    return text if text else None
+    if text:
+        return text
+
+    # Try 'orig' field (Docling 2.0 sometimes uses this)
+    orig = element.get('orig', '').strip()
+    if orig:
+        return orig
+
+    # For tables, extract text from cells
+    label = element.get('label', '')
+    if 'table' in label or label == 'document_index':
+        data = element.get('data', {})
+        if 'table_cells' in data:
+            cells = data['table_cells']
+            cell_texts = []
+            for cell in cells:
+                cell_text = cell.get('text', '').strip()
+                if cell_text:
+                    cell_texts.append(cell_text)
+            if cell_texts:
+                # Join with newlines for now (better than nothing)
+                return '\n'.join(cell_texts)
+
+    return None
 
 
 def extract_markdown_content(element: Dict[str, Any]) -> Optional[str]:
@@ -332,12 +368,11 @@ def extract_blocks_from_json(doc_json: Dict[str, Any], document_id: str) -> List
     """
     Extract all blocks from Docling JSON output.
 
-    Docling JSON structure can vary by version and document type.
-    This function handles multiple possible structures:
-    - Direct 'elements' list
-    - 'body' with nested elements
-    - 'pages' with per-page elements
-    - Root-level list
+    Docling 2.0 uses a reference-based structure where:
+    - body.children contains references like {"$ref": "#/texts/0"}
+    - Actual elements are in separate arrays: texts, tables, pictures, groups
+
+    This function handles both Docling 2.0 and older structures.
 
     Args:
         doc_json: Full Docling JSON output (from DoclingDocument.export_to_dict())
@@ -347,20 +382,34 @@ def extract_blocks_from_json(doc_json: Dict[str, Any], document_id: str) -> List
         List of block dicts ready for database insertion
 
     Example:
-        >>> doc_json = {'elements': [{...}, {...}, ...]}
+        >>> doc_json = {'texts': [{...}, ...], 'tables': [{...}, ...]}
         >>> blocks = extract_blocks_from_json(doc_json, 'doc-uuid-123')
         >>> len(blocks)
-        542
+        20000
     """
     blocks = []
     elements = []
 
-    # Option 1: Direct 'elements' list
-    if 'elements' in doc_json:
+    # Docling 2.0: Iterate through element arrays directly
+    if 'texts' in doc_json or 'tables' in doc_json:
+        logger.info("Detected Docling 2.0 structure with element arrays")
+
+        # Collect from all element arrays
+        for array_name in ['texts', 'tables', 'pictures', 'groups', 'key_value_items', 'form_items']:
+            if array_name in doc_json:
+                array_elements = doc_json[array_name]
+                if isinstance(array_elements, list):
+                    elements.extend(array_elements)
+                    logger.info(f"  Found {len(array_elements)} elements in '{array_name}' array")
+
+        logger.info(f"Total elements collected: {len(elements)}")
+
+    # Option 1: Direct 'elements' list (older Docling)
+    elif 'elements' in doc_json:
         elements = doc_json['elements']
         logger.info(f"Found {len(elements)} elements in 'elements' key")
 
-    # Option 2: 'body' with nested structure
+    # Option 2: 'body' with nested structure (older Docling)
     elif 'body' in doc_json:
         body = doc_json['body']
         if isinstance(body, list):
@@ -369,14 +418,14 @@ def extract_blocks_from_json(doc_json: Dict[str, Any], document_id: str) -> List
             elements = body['elements']
         logger.info(f"Found {len(elements)} elements in 'body' key")
 
-    # Option 3: 'pages' with elements per page
+    # Option 3: 'pages' with elements per page (older Docling)
     elif 'pages' in doc_json:
         for page in doc_json['pages']:
             if isinstance(page, dict) and 'elements' in page:
                 elements.extend(page['elements'])
         logger.info(f"Found {len(elements)} elements across pages")
 
-    # Option 4: Direct list at root
+    # Option 4: Direct list at root (older Docling)
     elif isinstance(doc_json, list):
         elements = doc_json
         logger.info(f"Found {len(elements)} elements at root level")

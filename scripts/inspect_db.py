@@ -53,6 +53,35 @@ def inspect_database(db_path: Optional[str] = None):
         logger.info(f"  Created: {row[4]}")
     logger.info("")
 
+    # Raw Blocks (Step 1 output)
+    logger.info("RAW BLOCKS (Step 1 - Parsing):")
+    cursor.execute("SELECT COUNT(*) FROM raw_blocks")
+    raw_block_count = cursor.fetchone()[0]
+    logger.info(f"  Total blocks: {raw_block_count:,}")
+
+    if raw_block_count > 0:
+        cursor.execute("""
+            SELECT block_type, COUNT(*) as count
+            FROM raw_blocks
+            GROUP BY block_type
+            ORDER BY count DESC
+            LIMIT 10
+        """)
+        logger.info("  Block type distribution:")
+        for row in cursor.fetchall():
+            logger.info(f"    {row[0]}: {row[1]:,}")
+
+        cursor.execute("""
+            SELECT MIN(page_number) as first, MAX(page_number) as last,
+                   COUNT(DISTINCT page_number) as unique_pages
+            FROM raw_blocks
+        """)
+        first, last, unique = cursor.fetchone()
+        logger.info(f"  Page coverage: {first} to {last} ({unique} unique pages)")
+    else:
+        logger.info("  (No raw blocks yet - run Step 1)")
+    logger.info("")
+
     # Sections by level
     logger.info("SECTIONS BY LEVEL:")
     cursor.execute("""
@@ -61,9 +90,13 @@ def inspect_database(db_path: Optional[str] = None):
         GROUP BY level
         ORDER BY level
     """)
-    for row in cursor.fetchall():
-        level_name = {1: "Chapters", 2: "Diseases/Topics", 3: "Subsections"}.get(row[0], f"Level {row[0]}")
-        logger.info(f"  {level_name}: {row[1]}")
+    section_count = cursor.fetchall()
+    if section_count:
+        for row in section_count:
+            level_name = {1: "Chapters", 2: "Diseases/Topics", 3: "Subsections"}.get(row[0], f"Level {row[0]}")
+            logger.info(f"  {level_name}: {row[1]}")
+    else:
+        logger.info("  (No sections yet - run Step 2)")
     logger.info("")
 
     # Sample sections
@@ -74,9 +107,13 @@ def inspect_database(db_path: Optional[str] = None):
         ORDER BY order_index
         LIMIT 10
     """)
-    for row in cursor.fetchall():
-        indent = "  " * row[0]
-        logger.info(f"{indent}[L{row[0]}] {row[1]}")
+    sample_sections = cursor.fetchall()
+    if sample_sections:
+        for row in sample_sections:
+            indent = "  " * row[0]
+            logger.info(f"{indent}[L{row[0]}] {row[1]}")
+    else:
+        logger.info("  (No sections yet)")
     logger.info("")
 
     # Chunks
@@ -90,7 +127,10 @@ def inspect_database(db_path: Optional[str] = None):
         FROM parent_chunks
     """)
     avg, min_val, max_val = cursor.fetchone()
-    logger.info(f"    Token stats: avg={avg:.1f}, min={min_val}, max={max_val}")
+    if avg is not None:
+        logger.info(f"    Token stats: avg={avg:.1f}, min={min_val}, max={max_val}")
+    else:
+        logger.info(f"    Token stats: (no data yet)")
 
     cursor.execute("SELECT COUNT(*) FROM child_chunks")
     child_count = cursor.fetchone()[0]
@@ -101,7 +141,10 @@ def inspect_database(db_path: Optional[str] = None):
         FROM child_chunks
     """)
     avg, min_val, max_val = cursor.fetchone()
-    logger.info(f"    Token stats: avg={avg:.1f}, min={min_val}, max={max_val}")
+    if avg is not None:
+        logger.info(f"    Token stats: avg={avg:.1f}, min={min_val}, max={max_val}")
+    else:
+        logger.info(f"    Token stats: (no data yet)")
     logger.info("")
 
     # Embeddings
@@ -125,23 +168,6 @@ def inspect_database(db_path: Optional[str] = None):
     except sqlite3.OperationalError:
         logger.warning("  No embeddings table found")
     logger.info("")
-
-    # Raw blocks
-    logger.info("RAW BLOCKS:")
-    cursor.execute("SELECT COUNT(*) FROM raw_blocks")
-    block_count = cursor.fetchone()[0]
-    logger.info(f"  Total blocks: {block_count}")
-
-    cursor.execute("""
-        SELECT block_type, COUNT(*) as count
-        FROM raw_blocks
-        GROUP BY block_type
-        ORDER BY count DESC
-    """)
-    logger.info("  By type:")
-    for row in cursor.fetchall():
-        logger.info(f"    {row[0]}: {row[1]}")
-
     logger.info("=" * 80)
 
     conn.close()
