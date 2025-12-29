@@ -16,7 +16,20 @@
       "Bash(PYTHONPATH=/Users/siddharthmanne/Projects/ugc23-rag-etl-pipeline/src python:*)",
       "Bash(PYTHONPATH=/Users/alexluo/Desktop/GitHub/ugc23-rag-etl-pipeline python:*)",
       "Bash(PYTHONPATH=/Users/alexluo/Desktop/GitHub/ugc23-rag-etl-pipeline sqlite3:*)",
-      "Bash(for f in /Users/alexluo/Desktop/GitHub/ugc23-rag-etl-pipeline/src/pipeline/step*.py)"
+      "Bash(for f in /Users/alexluo/Desktop/GitHub/ugc23-rag-etl-pipeline/src/pipeline/step*.py)",
+      "Bash(python3:*)",
+      "Bash(./venv/bin/python:*)",
+      "Bash(PYTHONPATH=/Users/alexluo/Desktop/GitHub/ucg23-rag-etl-pipeline python:*)",
+      "Bash(PYTHONPATH=/Users/alexluo/Desktop/GitHub/ucg23-rag-etl-pipeline sqlite3:*)",
+      "Bash(PYTHONPATH=/Users/alexluo/Desktop/GitHub/ucg23-rag-etl-pipeline python3:*)",
+      "Bash(xargs -I {} sh -c 'echo \"\"=== {} ===\"\" && grep \"\"def test_\"\" {} | wc -l')",
+      "Bash(PYTHONPATH=. pytest:*)",
+      "Bash(pytest:*)",
+      "Bash(./venv/bin/pytest tests/integration/test_step1_parsing.py::TestStep1Parsing::test_step1_parses_4_page_pdf -xvs)",
+      "Bash(./venv/bin/pytest tests/integration/test_step1_parsing.py -v)",
+      "Bash(./venv/bin/pytest tests/unit/ -v)",
+      "Bash(./venv/bin/pytest tests/ --collect-only -q)",
+      "Bash(./venv/bin/pytest tests/ -v --tb=short)"
     ],
     "deny": [],
     "ask": []

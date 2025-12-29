@@ -3,6 +3,11 @@ data/
 logs/
 Extraction_Process_v3.md
 
+# Test outputs (keep for inspection, regenerate as needed)
+tests/outputs/
+tests/report.html
+.pytest_cache/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

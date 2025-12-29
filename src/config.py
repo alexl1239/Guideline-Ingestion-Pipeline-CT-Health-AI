@@ -149,7 +149,7 @@ LARGE_TABLE_COL_THRESHOLD = 10
 PROJECT_ROOT = Path(__file__).parent.parent
 
 # Source PDF file (Docling has no page limit, so single file processing)
-SOURCE_PDF_PATH = PROJECT_ROOT / "data" / "ugc23_raw" / "Uganda_Clinical_Guidelines_2023.pdf"
+SOURCE_PDF_PATH = PROJECT_ROOT / "data" / "ucg23_raw" / "Uganda_Clinical_Guidelines_2023.pdf"
 
 
 # Output database
