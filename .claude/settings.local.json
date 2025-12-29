@@ -29,7 +29,8 @@
       "Bash(./venv/bin/pytest tests/integration/test_step1_parsing.py -v)",
       "Bash(./venv/bin/pytest tests/unit/ -v)",
       "Bash(./venv/bin/pytest tests/ --collect-only -q)",
-      "Bash(./venv/bin/pytest tests/ -v --tb=short)"
+      "Bash(./venv/bin/pytest tests/ -v --tb=short)",
+      "Bash(./venv/bin/pytest tests/integration/test_step1_parsing.py::TestStep1OutputQuality::test_block_type_distribution_is_plausible -xvs)"
     ],
     "deny": [],
     "ask": []

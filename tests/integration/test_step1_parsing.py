@@ -229,3 +229,71 @@ class TestStep1OutputQuality:
 
         finally:
             step1_module.SOURCE_PDF_PATH = original_pdf_path
+
+    def test_block_type_distribution_is_plausible(self, temp_db_with_registered_doc_4_pages, test_pdf_4_pages):
+        """
+        raw_blocks contains a plausible distribution of Docling block types.
+
+        Validates:
+        - Multiple distinct block types exist (≥2)
+        - Content blocks (text/paragraph/list_item) are present
+        - Content blocks are most common (>50% of total)
+        - Section headers exist but are less common (<25% of total)
+        """
+        db_path, doc_id = temp_db_with_registered_doc_4_pages
+
+        import src.pipeline.step1_parsing as step1_module
+        original_pdf_path = step1_module.SOURCE_PDF_PATH
+        step1_module.SOURCE_PDF_PATH = test_pdf_4_pages
+
+        try:
+            # Patch DATABASE_PATH in connections module where it's used
+            with patch('src.pipeline.step1_parsing.get_registered_document', return_value=doc_id), \
+                 patch('src.database.connections.DATABASE_PATH', db_path):
+
+                run()
+
+            conn = sqlite3.connect(str(db_path))
+            cursor = conn.cursor()
+
+            # Get total block count
+            cursor.execute("SELECT COUNT(*) FROM raw_blocks")
+            total_blocks = cursor.fetchone()[0]
+
+            # Get block type distribution
+            cursor.execute("""
+                SELECT block_type, COUNT(*) as count
+                FROM raw_blocks
+                GROUP BY block_type
+                ORDER BY count DESC
+            """)
+            distribution = {row[0]: row[1] for row in cursor.fetchall()}
+
+            conn.close()
+
+            # Validation 1: Multiple block types exist
+            assert len(distribution) >= 2, f"Expected ≥2 block types, got {len(distribution)}: {list(distribution.keys())}"
+
+            # Validation 2: Content blocks exist (text, paragraph, list_item)
+            content_count = (distribution.get('text', 0) +
+                           distribution.get('paragraph', 0) +
+                           distribution.get('list_item', 0))
+            assert content_count > 0, "Should have content blocks (text, paragraph, or list_item)"
+
+            # Validation 3: Content blocks should be most common (>50%)
+            content_percentage = (content_count / total_blocks) * 100
+            assert content_percentage > 50, f"Content blocks should be >50% of total, got {content_percentage:.1f}%"
+
+            # Validation 4: Section headers should exist but be less common (<25%)
+            header_count = distribution.get('section_header', 0)
+            if header_count > 0:
+                header_percentage = (header_count / total_blocks) * 100
+                assert header_percentage < 25, f"Section headers should be <25% of total, got {header_percentage:.1f}%"
+
+            print(f"\n✓ Block type distribution is plausible:")
+            for block_type, count in distribution.items():
+                percentage = (count / total_blocks) * 100
+                print(f"  {block_type}: {count} ({percentage:.1f}%)")
+
+        finally:
+            step1_module.SOURCE_PDF_PATH = original_pdf_path
