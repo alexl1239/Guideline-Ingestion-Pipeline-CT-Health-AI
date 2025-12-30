@@ -22,7 +22,6 @@ from src.config import (
     EMBEDDING_DIMENSION,
     DOCLING_VERSION,
 )
-from src.utils.logging_config import logger
 
 
 class SchemaError(Exception):
@@ -72,7 +71,7 @@ EMBEDDING_METADATA_INDEXES = [
 ]
 
 
-# Sections table: Hierarchical structure (chapters � diseases � subsections)
+# Sections table: Hierarchical structure (chapters → diseases → subsections)
 SECTIONS_TABLE = """
 CREATE TABLE IF NOT EXISTS sections (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -106,6 +105,7 @@ RAW_BLOCKS_TABLE = """
 CREATE TABLE IF NOT EXISTS raw_blocks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     document_id INTEGER NOT NULL,
+    section_id INTEGER,
     block_type TEXT NOT NULL,
     text_content TEXT,
     markdown_content TEXT,
@@ -118,6 +118,7 @@ CREATE TABLE IF NOT EXISTS raw_blocks (
     metadata TEXT DEFAULT '{}',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE,
+    FOREIGN KEY (section_id) REFERENCES sections(id) ON DELETE SET NULL,
     CONSTRAINT has_content CHECK (
         text_content IS NOT NULL OR markdown_content IS NOT NULL
     )
@@ -126,6 +127,7 @@ CREATE TABLE IF NOT EXISTS raw_blocks (
 
 RAW_BLOCKS_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_raw_blocks_document_id ON raw_blocks(document_id);",
+    "CREATE INDEX IF NOT EXISTS idx_raw_blocks_section_id ON raw_blocks(section_id);",
     "CREATE INDEX IF NOT EXISTS idx_raw_blocks_page_number ON raw_blocks(document_id, page_number);",
     "CREATE INDEX IF NOT EXISTS idx_raw_blocks_type ON raw_blocks(block_type);",
 ]

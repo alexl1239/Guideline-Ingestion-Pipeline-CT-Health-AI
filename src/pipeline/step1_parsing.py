@@ -26,7 +26,7 @@ from src.database.operations import (
     collect_block_statistics,
     log_block_statistics,
 )
-from src.utils.docling_mapper import extract_blocks_from_json
+from src.utils.parsing.docling_mapper import extract_blocks_from_json
 
 
 class ParsingError(Exception):

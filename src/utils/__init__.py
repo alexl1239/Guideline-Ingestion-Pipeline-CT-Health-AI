@@ -1,22 +1,19 @@
 """
 Utilities Module for UCG-23 RAG ETL Pipeline
 
-Provides utility functions for logging, chunking, tokenization, validation,
-embeddings, LLM helpers, and table conversion.
+Organized by pipeline step for clarity and maintainability.
+
+Structure:
+- logging_config.py: Shared logging utilities
+- parsing/: Step 1 utilities (Docling mapping)
+- segmentation/: Step 2 utilities (heading patterns, ToC parsing, hierarchy building)
 """
 
-from src.utils.logging_config import (
-    setup_logger,
-    get_logger,
-    log_step_start,
-    log_step_complete,
-    logger,
-)
+# Re-export logging utilities at top level for backward compatibility
+from src.utils.logging_config import setup_logger, get_logger, logger
 
 __all__ = [
     "setup_logger",
     "get_logger",
-    "log_step_start",
-    "log_step_complete",
     "logger",
 ]

@@ -5,7 +5,7 @@ Tests individual mapper functions for extracting data from Docling JSON.
 """
 
 import pytest
-from src.utils.docling_mapper import (
+from src.utils.parsing.docling_mapper import (
     extract_page_number,
     extract_page_range,
     extract_text_content,
