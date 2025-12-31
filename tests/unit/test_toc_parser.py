@@ -32,7 +32,8 @@ class TestParseTocEntry:
         assert entry is not None
         assert entry['heading'] == "Introduction"
         assert entry['page'] == 12
-        assert entry['level'] == 1
+        # Unnumbered entries default to level 2 (not chapters)
+        assert entry['level'] == 2
 
     def test_parse_chapter_with_colon(self):
         """Parse chapter entry with colon"""
@@ -102,13 +103,13 @@ class TestInferTocLevel:
         assert infer_toc_level("1.2.3.4.5") == 4
         assert infer_toc_level("1.2.3.4.5.6.7") == 4
 
-    def test_none_returns_1(self):
-        """None returns level 1"""
-        assert infer_toc_level(None) == 1
+    def test_none_returns_2(self):
+        """None returns level 2 (not a chapter)"""
+        assert infer_toc_level(None) == 2
 
-    def test_empty_string_returns_1(self):
-        """Empty string returns level 1"""
-        assert infer_toc_level("") == 1
+    def test_empty_string_returns_2(self):
+        """Empty string returns level 2 (not a chapter)"""
+        assert infer_toc_level("") == 2
 
 
 class TestValidateTocEntries:

@@ -246,6 +246,9 @@ def identify_diseases_from_toc(
 
     Matches diseases to chapters by their numbering prefix, not by page range.
     For example, "1.3 POISONING" is matched to chapter "1" regardless of page number.
+
+    Also infers missing Level 2 entries when ToC skips directly to Level 3
+    (e.g., chapters 4, 8, 14 which have "4.1.1" but no "4.1").
     """
     diseases = []
 
@@ -306,6 +309,9 @@ def identify_diseases_from_toc(
             'numbering': toc_numbering,
         })
 
+    # Infer missing Level 2 entries from orphan Level 3 entries
+    diseases = _infer_missing_diseases(diseases, toc_entries, chapters, chapter_by_number)
+
     # Deduplicate by numbering (keep first occurrence)
     seen_numberings: Set[str] = set()
     unique_diseases = []
@@ -319,6 +325,97 @@ def identify_diseases_from_toc(
 
     logger.info(f"Identified {len(unique_diseases)} diseases from ToC (deduped from {len(diseases)})")
     return unique_diseases
+
+
+def _infer_missing_diseases(
+    diseases: List[Dict[str, Any]],
+    toc_entries: List[Dict[str, Any]],
+    _chapters: List[Dict[str, Any]],  # Unused but kept for API consistency
+    chapter_by_number: Dict[str, Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """
+    Infer missing Level 2 (disease) entries from orphan Level 3 ToC entries.
+
+    Some chapters (e.g., 4, 8, 14) skip Level 2 in the ToC and go directly to Level 3.
+    For example: ToC has "4.1.1", "4.1.2" but no "4.1".
+
+    This function:
+    1. Finds Level 3+ entries whose Level 2 parent doesn't exist
+    2. Groups them by their Level 2 prefix (e.g., "4.1")
+    3. Creates synthetic Level 2 entries spanning those groups
+    """
+    # Get existing disease prefixes
+    existing_prefixes = {d.get('numbering') for d in diseases if d.get('numbering')}
+
+    # Find Level 3+ ToC entries
+    toc_level3_plus = [e for e in toc_entries if e.get('level', 0) >= 3]
+
+    # Group orphan Level 3+ entries by their Level 2 prefix
+    orphan_groups: Dict[str, List[Dict[str, Any]]] = {}
+
+    for entry in toc_level3_plus:
+        numbering = entry.get('numbering')
+        if not numbering:
+            continue
+
+        # Get Level 2 prefix (e.g., "4.1" from "4.1.1" or "4.1.2.1")
+        disease_prefix = _get_disease_prefix(numbering)
+        if not disease_prefix:
+            continue
+
+        # Check if this prefix already exists as a disease
+        if disease_prefix in existing_prefixes:
+            continue
+
+        if disease_prefix not in orphan_groups:
+            orphan_groups[disease_prefix] = []
+        orphan_groups[disease_prefix].append(entry)
+
+    if not orphan_groups:
+        return diseases
+
+    logger.warning(f"Found orphan Level 3+ entries for missing diseases: {list(orphan_groups.keys())}")
+
+    # Create synthetic Level 2 entries for each group
+    for prefix, entries in orphan_groups.items():
+        # Get chapter number from prefix
+        chapter_num = _get_chapter_number(prefix)
+        parent_chapter = chapter_by_number.get(chapter_num) if chapter_num else None
+
+        if not parent_chapter:
+            logger.warning(f"Could not find parent chapter for inferred disease: {prefix}")
+            continue
+
+        # Get page range from the group of entries
+        pages = [e.get('page') for e in entries if e.get('page')]
+        if not pages:
+            continue
+
+        page_start = min(pages)
+        page_end = max(pages)
+
+        # Ensure page_end doesn't exceed chapter end
+        if page_end > parent_chapter['page_end']:
+            page_end = parent_chapter['page_end']
+
+        # Create a heading - use generic since we don't have a ToC entry for this level
+        inferred_heading = f"{prefix} (Inferred Section)"
+
+        diseases.append({
+            'level': 2,
+            'heading': inferred_heading,
+            'page_start': page_start,
+            'page_end': page_end,
+            'order_index': len(diseases) + 1,
+            'header_block_id': None,
+            'parent_chapter': parent_chapter,
+            'numbering': prefix,
+            'is_inferred': True,
+        })
+
+        logger.info(f"Inferred missing disease: {prefix} (pages {page_start}-{page_end}) under chapter {chapter_num}")
+
+    return diseases
 
 
 def identify_numbered_subsections_from_toc(
@@ -378,12 +475,16 @@ def identify_numbered_subsections_from_toc(
 
         page_start = toc_page
 
-        # Calculate page_end
+        # Calculate page_end from next subsection
         if i + 1 < len(toc_subsections):
             next_page = toc_subsections[i + 1].get('page')
             page_end = (next_page - 1) if next_page else page_start
         else:
             page_end = parent_disease['page_end']
+
+        # Always cap at parent disease's page_end to avoid overlapping with sibling diseases
+        # (e.g., 1.3.13 should not overlap with 1.4)
+        page_end = min(page_end, parent_disease['page_end'])
 
         # Ensure page_end >= page_start
         if page_end < page_start:

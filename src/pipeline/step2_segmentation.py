@@ -326,6 +326,21 @@ def run() -> None:
         logger.error("❌ No chapters found in hierarchy")
         raise SegmentationError("No chapters found in hierarchy")
 
+    # Clear existing sections for this document before inserting new ones
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "DELETE FROM sections WHERE document_id = ?",
+            (document_id,)
+        )
+        # Also reset section_id on raw_blocks
+        cursor.execute(
+            "UPDATE raw_blocks SET section_id = NULL WHERE document_id = ?",
+            (document_id,)
+        )
+        conn.commit()
+        logger.info(f"Cleared existing sections for document {document_id}")
+
     # Track overall statistics
     total_sections = 0
     total_blocks_updated = 0
