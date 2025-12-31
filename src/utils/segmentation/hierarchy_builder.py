@@ -5,22 +5,54 @@ Constructs the section hierarchy (chapters → diseases → subsections) from
 heading candidates and Table of Contents entries.
 
 Key Functions:
-- identify_chapters: Find chapter-level sections
-- identify_diseases: Find disease/topic sections within chapters
+- identify_chapters: Find chapter-level sections from ToC
+- identify_diseases: Find disease/topic sections from ToC, matched by numbering
 - identify_subsections: Find subsections within diseases
 - build_heading_path: Construct full heading path strings
 - assign_blocks_to_sections: Map blocks to sections by page/order
 """
 
-from typing import List, Dict, Any, Optional, Set
+from typing import List, Dict, Any, Optional, Set, Tuple
 from src.utils.logging_config import logger
 from src.utils.segmentation.heading_patterns import (
-    extract_numbered_heading,
-    infer_level_from_numbering,
     is_chapter_heading,
     is_standard_subsection,
-    score_heading_candidate,
 )
+
+
+def _get_chapter_number(numbering: Optional[str]) -> Optional[str]:
+    """
+    Extract the chapter number from a numbering string.
+
+    Examples:
+        "1" -> "1"
+        "1.2" -> "1"
+        "1.2.3" -> "1"
+        "24.1.2" -> "24"
+        None -> None
+    """
+    if not numbering:
+        return None
+    parts = numbering.split('.')
+    return parts[0] if parts else None
+
+
+def _get_disease_prefix(numbering: Optional[str]) -> Optional[str]:
+    """
+    Extract the disease prefix (first two parts) from a numbering string.
+
+    Examples:
+        "1.2" -> "1.2"
+        "1.2.3" -> "1.2"
+        "24.1.2.1" -> "24.1"
+        None -> None
+    """
+    if not numbering:
+        return None
+    parts = numbering.split('.')
+    if len(parts) >= 2:
+        return f"{parts[0]}.{parts[1]}"
+    return None
 
 
 def identify_chapters(
@@ -28,105 +60,65 @@ def identify_chapters(
     toc_entries: List[Dict[str, Any]]
 ) -> List[Dict[str, Any]]:
     """
-    Identify chapter-level sections (Level 1).
-
-    Uses ToC entries and heading patterns to find chapters. Matches ToC
-    entries with header blocks using page proximity and text similarity.
-
-    Args:
-        header_blocks: List of section header blocks from raw_blocks
-        toc_entries: List of ToC entries from extract_toc_from_docling
-
-    Returns:
-        List of chapter section dicts with:
-            - level: 1
-            - heading: Chapter heading text
-            - page_start: First page of chapter
-            - page_end: Last page (estimated)
-            - order_index: Sequential order
-            - header_block_id: ID of the header block
-
-    Example:
-        >>> chapters = identify_chapters(headers, toc)
-        >>> for ch in chapters:
-        ...     print(f"Chapter: {ch['heading']} (pages {ch['page_start']}-{ch['page_end']})")
+    Identify chapter-level sections (Level 1) from ToC.
     """
     chapters = []
 
     # Filter ToC entries for level 1 (chapters)
     toc_chapters = [e for e in toc_entries if e.get('level') == 1]
 
-    # Track used header blocks to avoid duplicates
-    used_block_ids: Set[int] = set()
-
     for i, toc_entry in enumerate(toc_chapters):
         toc_heading = toc_entry['heading']
         toc_page = toc_entry.get('page')
+        toc_numbering = toc_entry.get('numbering')
 
-        # Find matching header block
-        best_match = None
-        best_score = 0
+        if not toc_page:
+            logger.warning(f"Skipping ToC chapter without page number: {toc_heading}")
+            continue
 
-        for block in header_blocks:
-            if block['id'] in used_block_ids:
-                continue
+        page_start = toc_page
 
-            block_text = block['text_content']
-            block_page = block['page_number']
+        # Calculate page_end from next chapter's ToC page
+        if i + 1 < len(toc_chapters):
+            next_toc_page = toc_chapters[i + 1].get('page')
+            page_end = (next_toc_page - 1) if next_toc_page else (page_start + 50)
+        else:
+            page_end = page_start + 100
 
-            # Skip if not chapter-like
-            if not is_chapter_heading(block_text):
-                continue
+        # Ensure page_end >= page_start
+        if page_end < page_start:
+            page_end = page_start
 
-            # Calculate match score
-            score = 0
+        # Format heading with numbering if available
+        if toc_numbering:
+            formatted_heading = f"{toc_numbering} {toc_heading}"
+        else:
+            formatted_heading = toc_heading
 
-            # Page proximity (if ToC has page number)
-            if toc_page and abs(block_page - toc_page) <= 2:
-                score += 40
-
-            # Text similarity (simple contains check)
-            if toc_heading.lower() in block_text.lower() or block_text.lower() in toc_heading.lower():
-                score += 50
-
-            # Chapter pattern bonus
-            score += 10
-
-            if score > best_score:
-                best_score = score
-                best_match = block
-
-        if best_match:
-            # Estimate page_end (until next chapter or max)
-            if i + 1 < len(toc_chapters):
-                next_page = toc_chapters[i + 1].get('page', best_match['page_number'] + 50)
-                page_end = next_page - 1
-            else:
-                page_end = best_match['page_number'] + 100  # Estimate
-
-            chapters.append({
-                'level': 1,
-                'heading': best_match['text_content'],
-                'page_start': best_match['page_number'],
-                'page_end': page_end,
-                'order_index': len(chapters) + 1,
-                'header_block_id': best_match['id'],
-            })
-
-            used_block_ids.add(best_match['id'])
+        chapters.append({
+            'level': 1,
+            'heading': formatted_heading,
+            'page_start': page_start,
+            'page_end': page_end,
+            'order_index': len(chapters) + 1,
+            'header_block_id': None,
+            'numbering': toc_numbering,
+        })
 
     # Fallback: if no ToC chapters found, look for chapter patterns directly
     if not chapters:
         logger.warning("No ToC chapters found, using pattern-based detection")
+        used_block_ids: Set[int] = set()
         for block in header_blocks:
             if block['id'] not in used_block_ids and is_chapter_heading(block['text_content']):
                 chapters.append({
                     'level': 1,
                     'heading': block['text_content'],
                     'page_start': block['page_number'],
-                    'page_end': block['page_number'] + 50,  # Estimate
+                    'page_end': block['page_number'] + 50,
                     'order_index': len(chapters) + 1,
                     'header_block_id': block['id'],
+                    'numbering': None,
                 })
                 used_block_ids.add(block['id'])
 
@@ -134,155 +126,217 @@ def identify_chapters(
     return chapters
 
 
-def identify_diseases(
-    header_blocks: List[Dict[str, Any]],
-    chapter: Dict[str, Any],
-    toc_entries: List[Dict[str, Any]]
+def identify_diseases_from_toc(
+    toc_entries: List[Dict[str, Any]],
+    chapters: List[Dict[str, Any]]
 ) -> List[Dict[str, Any]]:
     """
-    Identify disease/topic sections (Level 2) within a chapter.
+    Identify disease/topic sections (Level 2) from ToC entries.
 
-    Looks for numbered headings like "1.1.1 Disease Name" and matches
-    with ToC entries when available.
-
-    Args:
-        header_blocks: All section header blocks
-        chapter: Parent chapter section dict
-        toc_entries: ToC entries for reference
-
-    Returns:
-        List of disease section dicts with level=2
-
-    Example:
-        >>> diseases = identify_diseases(headers, chapter, toc)
-        >>> for d in diseases:
-        ...     print(f"  {d['heading']} (page {d['page_start']})")
+    Matches diseases to chapters by their numbering prefix, not by page range.
+    For example, "1.3 POISONING" is matched to chapter "1" regardless of page number.
     """
     diseases = []
 
-    # Filter headers within chapter page range
-    chapter_headers = [
-        h for h in header_blocks
-        if chapter['page_start'] <= h['page_number'] <= chapter['page_end']
-        and h['id'] != chapter['header_block_id']
-    ]
+    # Create a lookup of chapters by their numbering
+    chapter_by_number: Dict[str, Dict[str, Any]] = {}
+    for chapter in chapters:
+        chapter_num = _get_chapter_number(chapter.get('numbering'))
+        if chapter_num:
+            chapter_by_number[chapter_num] = chapter
 
-    # Track used blocks
-    used_block_ids: Set[int] = set()
+    # Filter ToC entries for level 2 (diseases)
+    toc_diseases = [e for e in toc_entries if e.get('level') == 2]
 
-    for block in chapter_headers:
-        if block['id'] in used_block_ids:
+    for i, toc_entry in enumerate(toc_diseases):
+        toc_heading = toc_entry['heading']
+        toc_page = toc_entry.get('page')
+        toc_numbering = toc_entry.get('numbering')
+
+        if not toc_page:
+            logger.warning(f"Skipping ToC disease without page number: {toc_heading}")
             continue
 
-        text = block['text_content']
+        # Find parent chapter by numbering prefix
+        chapter_num = _get_chapter_number(toc_numbering)
+        parent_chapter = chapter_by_number.get(chapter_num) if chapter_num else None
 
-        # Check for numbered heading (disease pattern)
-        numbered = extract_numbered_heading(text)
-        if numbered:
-            numbering, heading_text = numbered
-            level = infer_level_from_numbering(numbering)
+        if not parent_chapter:
+            logger.warning(f"Could not find parent chapter for disease: {toc_numbering} {toc_heading}")
+            continue
 
-            # Level 2 is disease/topic
-            if level == 2:
-                diseases.append({
-                    'level': 2,
-                    'heading': text,
-                    'page_start': block['page_number'],
-                    'page_end': block['page_number'] + 5,  # Will adjust later
-                    'order_index': len(diseases) + 1,
-                    'header_block_id': block['id'],
-                    'parent_chapter': chapter,
-                    'numbering': numbering,
-                })
-                used_block_ids.add(block['id'])
+        page_start = toc_page
 
-    # Adjust page_end for each disease (until next disease)
-    for i, disease in enumerate(diseases):
-        if i + 1 < len(diseases):
-            disease['page_end'] = diseases[i + 1]['page_start'] - 1
+        # Calculate page_end from next disease's ToC page
+        if i + 1 < len(toc_diseases):
+            next_toc_page = toc_diseases[i + 1].get('page')
+            page_end = (next_toc_page - 1) if next_toc_page else (page_start + 10)
         else:
-            disease['page_end'] = chapter['page_end']
+            page_end = parent_chapter['page_end']
 
-    logger.debug(f"Identified {len(diseases)} diseases in chapter '{chapter['heading']}'")
+        # Ensure page_end >= page_start
+        if page_end < page_start:
+            page_end = page_start
+
+        # Format heading with numbering
+        if toc_numbering:
+            formatted_heading = f"{toc_numbering} {toc_heading}"
+        else:
+            formatted_heading = toc_heading
+
+        diseases.append({
+            'level': 2,
+            'heading': formatted_heading,
+            'page_start': page_start,
+            'page_end': page_end,
+            'order_index': len(diseases) + 1,
+            'header_block_id': None,
+            'parent_chapter': parent_chapter,
+            'numbering': toc_numbering,
+        })
+
+    logger.info(f"Identified {len(diseases)} diseases from ToC")
     return diseases
 
 
-def identify_subsections(
+def identify_subsections_from_toc_and_headers(
     header_blocks: List[Dict[str, Any]],
-    disease: Dict[str, Any]
+    toc_entries: List[Dict[str, Any]],
+    diseases: List[Dict[str, Any]]
 ) -> List[Dict[str, Any]]:
     """
-    Identify subsections (Level 3+) within a disease.
+    Identify subsections (Level 3+) from ToC and header blocks.
 
-    Looks for standard clinical subsections (Definition, Management, etc.)
-    and numbered subsections (e.g., "1.1.1.1").
-
-    Args:
-        header_blocks: All section header blocks
-        disease: Parent disease section dict
-
-    Returns:
-        List of subsection dicts with level=3+
-
-    Example:
-        >>> subsections = identify_subsections(headers, disease)
-        >>> for s in subsections:
-        ...     print(f"    {s['heading']}")
+    Matches subsections to diseases by their numbering prefix.
+    Also identifies standard clinical subsections (Causes, Management, etc.)
     """
     subsections = []
 
-    # Filter headers within disease page range
-    disease_headers = [
-        h for h in header_blocks
-        if disease['page_start'] <= h['page_number'] <= disease['page_end']
-        and h['id'] != disease['header_block_id']
-    ]
+    # Create lookup of diseases by their numbering prefix
+    disease_by_prefix: Dict[str, Dict[str, Any]] = {}
+    for disease in diseases:
+        prefix = _get_disease_prefix(disease.get('numbering'))
+        if prefix:
+            disease_by_prefix[prefix] = disease
 
-    for block in disease_headers:
-        text = block['text_content']
+    # First, get numbered subsections from ToC (Level 3+)
+    toc_subsections = [e for e in toc_entries if e.get('level', 0) >= 3]
 
-        # Check for standard subsection
-        is_standard, subsection_type = is_standard_subsection(text)
-        if is_standard:
-            subsections.append({
-                'level': 3,
-                'heading': text,
-                'page_start': block['page_number'],
-                'page_end': block['page_number'] + 1,  # Will adjust
-                'order_index': len(subsections) + 1,
-                'header_block_id': block['id'],
-                'parent_disease': disease,
-                'subsection_type': subsection_type,
-            })
+    for i, toc_entry in enumerate(toc_subsections):
+        toc_heading = toc_entry['heading']
+        toc_page = toc_entry.get('page')
+        toc_numbering = toc_entry.get('numbering')
+        toc_level = toc_entry.get('level', 3)
+
+        if not toc_page:
             continue
 
-        # Check for numbered subsection
-        numbered = extract_numbered_heading(text)
-        if numbered:
-            numbering, heading_text = numbered
-            level = infer_level_from_numbering(numbering)
+        # Find parent disease by numbering prefix
+        disease_prefix = _get_disease_prefix(toc_numbering)
+        parent_disease = disease_by_prefix.get(disease_prefix) if disease_prefix else None
 
-            # Level 3+ is subsection
-            if level >= 3:
+        # Validate: if the page doesn't fall within the disease's chapter range,
+        # the numbering might be wrong in the ToC (e.g., "1.1.1" on page 614)
+        if parent_disease:
+            parent_chapter = parent_disease.get('parent_chapter', {})
+            if parent_chapter:
+                chapter_start = parent_chapter.get('page_start', 0)
+                chapter_end = parent_chapter.get('page_end', 9999)
+                if not (chapter_start <= toc_page <= chapter_end):
+                    # Numbering doesn't match page location - use page-based lookup instead
+                    logger.debug(f"ToC numbering mismatch: {toc_numbering} {toc_heading} (page {toc_page}) doesn't match chapter range {chapter_start}-{chapter_end}")
+                    parent_disease = None
+
+        if not parent_disease:
+            # Try to find by page range as fallback
+            for disease in diseases:
+                if disease['page_start'] <= toc_page <= disease['page_end']:
+                    parent_disease = disease
+                    break
+
+        if not parent_disease:
+            continue
+
+        page_start = toc_page
+
+        # Calculate page_end
+        if i + 1 < len(toc_subsections):
+            next_page = toc_subsections[i + 1].get('page')
+            page_end = (next_page - 1) if next_page else page_start
+        else:
+            page_end = parent_disease['page_end']
+
+        # Ensure page_end >= page_start
+        if page_end < page_start:
+            page_end = page_start
+
+        # Format heading
+        if toc_numbering:
+            formatted_heading = f"{toc_numbering} {toc_heading}"
+        else:
+            formatted_heading = toc_heading
+
+        subsections.append({
+            'level': toc_level,
+            'heading': formatted_heading,
+            'page_start': page_start,
+            'page_end': page_end,
+            'order_index': len(subsections) + 1,
+            'header_block_id': None,
+            'parent_disease': parent_disease,
+            'numbering': toc_numbering,
+        })
+
+    # Track pages already covered by ToC subsections
+    toc_covered_pages: Set[Tuple[int, str]] = set()
+    for sub in subsections:
+        for page in range(sub['page_start'], sub['page_end'] + 1):
+            toc_covered_pages.add((page, sub['heading']))
+
+    # Now find standard clinical subsections from headers (Causes, Management, etc.)
+    for disease in diseases:
+        disease_headers = [
+            h for h in header_blocks
+            if disease['page_start'] <= h['page_number'] <= disease['page_end']
+        ]
+
+        for block in disease_headers:
+            text = block['text_content']
+
+            # Check for standard subsection
+            is_standard, subsection_type = is_standard_subsection(text)
+            if is_standard:
+                # Check if this isn't already covered by a ToC subsection
+                page = block['page_number']
+
                 subsections.append({
-                    'level': level,
+                    'level': 3,
                     'heading': text,
-                    'page_start': block['page_number'],
-                    'page_end': block['page_number'] + 1,
+                    'page_start': page,
+                    'page_end': page,  # Will adjust later
                     'order_index': len(subsections) + 1,
                     'header_block_id': block['id'],
                     'parent_disease': disease,
-                    'numbering': numbering,
+                    'subsection_type': subsection_type,
                 })
 
-    # Adjust page_end for subsections
+    # Sort subsections by page and adjust page_end
+    subsections.sort(key=lambda s: (s['page_start'], s.get('level', 3)))
+
     for i, subsection in enumerate(subsections):
         if i + 1 < len(subsections):
-            subsection['page_end'] = subsections[i + 1]['page_start'] - 1
-        else:
-            subsection['page_end'] = disease['page_end']
+            next_sub = subsections[i + 1]
+            # Only adjust if same parent disease
+            if subsection.get('parent_disease') == next_sub.get('parent_disease'):
+                new_end = next_sub['page_start'] - 1
+                if new_end >= subsection['page_start']:
+                    subsection['page_end'] = new_end
 
-    logger.debug(f"Identified {len(subsections)} subsections in disease '{disease['heading']}'")
+        # Ensure page_end >= page_start
+        if subsection['page_end'] < subsection['page_start']:
+            subsection['page_end'] = subsection['page_start']
+
+    logger.info(f"Identified {len(subsections)} subsections")
     return subsections
 
 
@@ -291,17 +345,6 @@ def build_heading_path(section: Dict[str, Any]) -> str:
     Construct full heading path for a section.
 
     Builds path like: "Chapter > Disease > Subsection"
-
-    Args:
-        section: Section dict (must have level and heading)
-
-    Returns:
-        Full heading path string
-
-    Example:
-        >>> path = build_heading_path(subsection)
-        >>> print(path)
-        "Emergencies and Trauma > 1.1.1 Anaphylactic Shock > Management"
     """
     # Level 1 (Chapter) - no parent
     if section['level'] == 1:
@@ -334,60 +377,44 @@ def assign_blocks_to_sections(
 
     Assigns blocks based on page number and order. Excludes page_header
     and page_footer blocks.
-
-    Args:
-        all_blocks: All raw_blocks (not just headers)
-        sections: All sections (chapters, diseases, subsections)
-
-    Returns:
-        Dict mapping section_id to list of block_ids
-
-    Example:
-        >>> mapping = assign_blocks_to_sections(blocks, sections)
-        >>> for section_id, block_ids in mapping.items():
-        ...     print(f"Section {section_id}: {len(block_ids)} blocks")
     """
     mapping: Dict[int, List[int]] = {}
 
-    # Sort sections by page_start for efficient lookup
-    sorted_sections = sorted(sections, key=lambda s: (s['page_start'], s['level']))
+    # Sort sections by page_start and level (higher level = more specific)
+    sorted_sections = sorted(sections, key=lambda s: (s['page_start'], -s['level']))
 
-    # Create a lookup dict for faster access
-    # Use (page, level) as key to handle nested sections
-    section_lookup: Dict[tuple, Dict[str, Any]] = {}
+    # Build page-to-section mapping
+    # For each page, store sections that cover it, preferring more specific (higher level)
+    page_sections: Dict[int, List[Dict[str, Any]]] = {}
     for section in sorted_sections:
         for page in range(section['page_start'], section['page_end'] + 1):
-            key = (page, section['level'])
-            # Keep the most specific (highest level) section for each page
-            if key not in section_lookup or section['level'] > section_lookup[key]['level']:
-                section_lookup[key] = section
+            if page not in page_sections:
+                page_sections[page] = []
+            page_sections[page].append(section)
 
     orphaned_blocks = 0
 
     for block in all_blocks:
-        # Skip page headers/footers (they shouldn't have section_id)
+        # Skip page headers/footers
         if block.get('block_type') in ['page_header', 'page_footer']:
             continue
 
         page = block['page_number']
 
         # Find most specific section for this page
-        # Try level 3+ first (subsections), then level 2 (diseases), then level 1 (chapters)
         assigned_section = None
-
-        for level in [4, 3, 2, 1]:
-            key = (page, level)
-            if key in section_lookup:
-                assigned_section = section_lookup[key]
-                break
+        if page in page_sections:
+            # Get the most specific (highest level) section for this page
+            candidates = page_sections[page]
+            if candidates:
+                # Sort by level descending, then by page_start ascending
+                candidates.sort(key=lambda s: (-s['level'], s['page_start']))
+                assigned_section = candidates[0]
 
         if assigned_section:
-            # Use a temporary ID (will be replaced with actual DB ID later)
-            section_id = id(assigned_section)  # Use object ID as temporary key
-
+            section_id = id(assigned_section)
             if section_id not in mapping:
                 mapping[section_id] = []
-
             mapping[section_id].append(block['id'])
         else:
             orphaned_blocks += 1
@@ -407,28 +434,47 @@ def build_complete_hierarchy(
     """
     Build complete section hierarchy from headers and ToC.
 
-    Orchestrates chapter, disease, and subsection identification into
-    a flat list of all sections with proper heading paths.
-
-    Args:
-        header_blocks: All section header blocks from raw_blocks
-        toc_entries: ToC entries from extract_toc_from_docling
-
-    Returns:
-        Flat list of all sections (chapters, diseases, subsections) with
-        heading_path populated, ready for database insertion
-
-    Example:
-        >>> hierarchy = build_complete_hierarchy(headers, toc)
-        >>> print(f"Total sections: {len(hierarchy)}")
-        >>> for section in hierarchy[:5]:
-        ...     print(f"[L{section['level']}] {section['heading_path']}")
+    Uses ToC entries as the primary source for chapters and diseases,
+    matching by numbering prefix rather than page ranges.
     """
     all_sections = []
     global_order = 1
 
-    # Step 1: Identify chapters
+    # Step 1: Identify chapters from ToC
     chapters = identify_chapters(header_blocks, toc_entries)
+
+    # Add chapters to all_sections
+    for chapter in chapters:
+        chapter['order_index'] = global_order
+        chapter['heading_path'] = build_heading_path(chapter)
+        all_sections.append(chapter)
+        global_order += 1
+
+    # Step 2: Identify diseases from ToC (matched by numbering, not page range)
+    diseases = identify_diseases_from_toc(toc_entries, chapters)
+
+    # Group diseases by parent chapter
+    diseases_by_chapter: Dict[int, List[Dict[str, Any]]] = {}
+    for disease in diseases:
+        chapter_id = id(disease.get('parent_chapter'))
+        if chapter_id not in diseases_by_chapter:
+            diseases_by_chapter[chapter_id] = []
+        diseases_by_chapter[chapter_id].append(disease)
+
+    # Step 3: Identify subsections from ToC and headers
+    subsections = identify_subsections_from_toc_and_headers(header_blocks, toc_entries, diseases)
+
+    # Group subsections by parent disease
+    subsections_by_disease: Dict[int, List[Dict[str, Any]]] = {}
+    for subsection in subsections:
+        disease_id = id(subsection.get('parent_disease'))
+        if disease_id not in subsections_by_disease:
+            subsections_by_disease[disease_id] = []
+        subsections_by_disease[disease_id].append(subsection)
+
+    # Build final ordered list: chapter -> its diseases -> each disease's subsections
+    all_sections = []
+    global_order = 1
 
     for chapter in chapters:
         chapter['order_index'] = global_order
@@ -436,19 +482,21 @@ def build_complete_hierarchy(
         all_sections.append(chapter)
         global_order += 1
 
-        # Step 2: Identify diseases within chapter
-        diseases = identify_diseases(header_blocks, chapter, toc_entries)
+        # Add this chapter's diseases
+        chapter_diseases = diseases_by_chapter.get(id(chapter), [])
+        chapter_diseases.sort(key=lambda d: (d['page_start'], d.get('numbering', '')))
 
-        for disease in diseases:
+        for disease in chapter_diseases:
             disease['order_index'] = global_order
             disease['heading_path'] = build_heading_path(disease)
             all_sections.append(disease)
             global_order += 1
 
-            # Step 3: Identify subsections within disease
-            subsections = identify_subsections(header_blocks, disease)
+            # Add this disease's subsections
+            disease_subsections = subsections_by_disease.get(id(disease), [])
+            disease_subsections.sort(key=lambda s: (s['page_start'], s.get('level', 3)))
 
-            for subsection in subsections:
+            for subsection in disease_subsections:
                 subsection['order_index'] = global_order
                 subsection['heading_path'] = build_heading_path(subsection)
                 all_sections.append(subsection)
@@ -464,8 +512,8 @@ def build_complete_hierarchy(
 
 __all__ = [
     'identify_chapters',
-    'identify_diseases',
-    'identify_subsections',
+    'identify_diseases_from_toc',
+    'identify_subsections_from_toc_and_headers',
     'build_heading_path',
     'assign_blocks_to_sections',
     'build_complete_hierarchy',

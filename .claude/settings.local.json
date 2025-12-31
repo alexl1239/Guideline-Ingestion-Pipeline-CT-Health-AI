@@ -34,7 +34,8 @@
       "Bash(./venv/bin/pytest tests/unit/test_heading_patterns.py -v)",
       "Bash(./venv/bin/pytest tests/integration/test_database_schema.py -v --tb=short)",
       "Bash(./venv/bin/pytest tests/unit/test_toc_parser.py -v)",
-      "Bash(./venv/bin/pytest tests/unit/ -v --tb=short)"
+      "Bash(./venv/bin/pytest tests/unit/ -v --tb=short)",
+      "Bash(PYTHONPATH=/Users/alexluo/Desktop/GitHub/ucg23-rag-etl-pipeline ./venv/bin/python:*)"
     ],
     "deny": [],
     "ask": []

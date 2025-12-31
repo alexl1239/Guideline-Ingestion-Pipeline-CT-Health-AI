@@ -30,7 +30,9 @@ TOC_PAGE_PATTERN = re.compile(
 )
 
 # Pattern for numbered ToC entries
-TOC_NUMBERED_PATTERN = re.compile(r'^(\d+(?:\.\d+)*)\s+(.+)$')
+# Matches: "24 SURGERY", "24. SURGERY", "1.2.3 Disease Name"
+# The \.? allows for optional trailing period after chapter numbers (e.g., "24.")
+TOC_NUMBERED_PATTERN = re.compile(r'^(\d+(?:\.\d+)*)\.?\s+(.+)$')
 
 
 def extract_toc_from_docling(docling_json: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -77,7 +79,7 @@ def _find_explicit_toc(docling_json: Dict[str, Any]) -> List[Dict[str, Any]]:
     Find and parse an explicit Table of Contents section.
 
     Looks for ToC markers in the first 20 pages, then parses entries.
-    Also recognizes document_index labels from Docling.
+    Also recognizes document_index labels from Docling (stored in tables array).
 
     Args:
         docling_json: Full Docling JSON output
@@ -85,40 +87,75 @@ def _find_explicit_toc(docling_json: Dict[str, Any]) -> List[Dict[str, Any]]:
     Returns:
         List of parsed ToC entries, or empty list if no ToC found
     """
-    texts = docling_json.get('texts', [])
-    if not texts:
-        return []
-
-    # Strategy 1: Look for document_index labels (Docling's ToC marker)
+    # Strategy 1: Look for document_index tables (Docling's ToC marker)
+    # ToC is stored in the tables array with label='document_index'
+    tables = docling_json.get('tables', [])
     toc_entries_from_index = []
-    for text_elem in texts:
-        label = text_elem.get('label', '')
+
+    for table in tables:
+        label = table.get('label', '')
         if label == 'document_index':
-            text_content = text_elem.get('text', '').strip()
-            prov = text_elem.get('prov', [])
+            # Get page from provenance
+            prov = table.get('prov', [])
             page = prov[0].get('page_no') if prov else None
 
-            # Each document_index block may contain multiple lines
-            lines = text_content.split('\n')
-            for line in lines:
-                line = line.strip()
-                if not line or len(line) < 5:  # Skip empty/very short lines
+            # Extract text from table data
+            data = table.get('data', {})
+            table_cells = data.get('table_cells', [])
+
+            # Group cells by row using start_row_offset_idx
+            rows = {}
+            for cell in table_cells:
+                row_idx = cell.get('start_row_offset_idx')
+                col_idx = cell.get('start_col_offset_idx')
+                if row_idx is not None and col_idx is not None:
+                    if row_idx not in rows:
+                        rows[row_idx] = {}
+                    rows[row_idx][col_idx] = cell.get('text', '').strip()
+
+            # Process each row
+            for row_idx in sorted(rows.keys()):
+                row_cells = rows[row_idx]
+
+                # Column 0 is heading, Column 1 is either dotted leader or page number
+                heading = row_cells.get(0, '')
+                col1 = row_cells.get(1, '')
+
+                # Skip if heading is too short
+                if len(heading) < 3:
                     continue
 
-                # Parse ToC entry from each line
-                entry = parse_toc_entry(line)
+                # Skip lines that are just dots or Roman numerals
+                if all(c in '.… ' for c in heading):
+                    continue
+                if heading.upper() in ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X',
+                                      'XI', 'XII', 'XIII', 'XIV', 'XV', 'XX', 'XXX', 'XL', 'L']:
+                    continue
+
+                # If col1 is just dots, the heading likely contains the page number
+                # Otherwise, col1 is the page number
+                if all(c in '.… ' for c in col1):
+                    # Page number embedded in heading - parse as-is
+                    toc_line = heading
+                else:
+                    # Explicit page number in col1
+                    toc_line = f"{heading} {col1}"
+
+                # Parse ToC entry
+                entry = parse_toc_entry(toc_line)
                 if entry:
-                    # Use page from provenance if not in text
-                    if not entry['page'] and page:
-                        entry['page'] = page
                     toc_entries_from_index.append(entry)
 
     # If we found document_index entries, use them
     if len(toc_entries_from_index) >= 5:
-        logger.debug(f"Found {len(toc_entries_from_index)} ToC entries from document_index labels")
+        logger.debug(f"Found {len(toc_entries_from_index)} ToC entries from document_index tables")
         return toc_entries_from_index
 
-    # Strategy 2: Find ToC start marker (look in first 20 pages)
+    # Strategy 2: Find ToC start marker in texts (look in first 20 pages)
+    texts = docling_json.get('texts', [])
+    if not texts:
+        return []
+
     toc_start_idx = None
     for i, text in enumerate(texts[:100]):  # Check first 100 text elements
         text_content = text.get('text', '').strip().lower()
@@ -254,8 +291,8 @@ def parse_toc_entry(text: str) -> Optional[Dict[str, Any]]:
             numbering = num_match.group(1)
             heading = num_match.group(2).strip()
 
-        # Infer level
-        level = infer_toc_level(numbering) if numbering else 1
+        # Infer level (non-numbered entries default to Level 2)
+        level = infer_toc_level(numbering)
 
         return {
             'heading': heading,
@@ -287,10 +324,10 @@ def infer_toc_level(numbering: Optional[str]) -> int:
     Infer hierarchy level from ToC numbering.
 
     Rules:
-    - "1" or "2" → Level 1 (Chapter)
+    - "1" or "23" (single number, 1-99) → Level 1 (Chapter)
     - "1.1" or "2.3" → Level 2 (Disease/Topic)
     - "1.1.1" or "2.3.4" → Level 3 (Subsection)
-    - No numbering → Level 1 (default)
+    - No numbering → Level 2 (not a chapter)
 
     Args:
         numbering: Numeric prefix (e.g., "1.2.3")
@@ -301,11 +338,15 @@ def infer_toc_level(numbering: Optional[str]) -> int:
     Example:
         >>> infer_toc_level("1")
         1
+        >>> infer_toc_level("23")
+        1
         >>> infer_toc_level("1.2.3")
         3
+        >>> infer_toc_level(None)
+        2
     """
     if not numbering:
-        return 1
+        return 2  # Non-numbered entries are not chapters
 
     # Count dots to determine depth
     depth = numbering.count('.') + 1

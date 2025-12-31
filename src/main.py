@@ -9,6 +9,8 @@ import argparse
 import sys
 
 from src.utils.logging_config import setup_logger, get_logger
+from src.database.schema import create_schema, validate_schema
+from src.config import DATABASE_PATH
 from src.pipeline.step0_registration import run as run_step0
 from src.pipeline.step1_parsing import run as run_step1
 from src.pipeline.step2_segmentation import run as run_step2
@@ -33,6 +35,24 @@ def main():
     logger.info("=" * 80)
     logger.info("UCG-23 RAG ETL Pipeline")
     logger.info("=" * 80)
+
+    # Initialize database schema if needed
+    if not DATABASE_PATH.exists():
+        logger.info("Database not found, creating schema...")
+        try:
+            create_schema()
+            logger.success("✓ Database schema created successfully")
+        except Exception as e:
+            logger.error(f"Failed to create database schema: {e}")
+            sys.exit(1)
+    else:
+        logger.info("Database exists, validating schema...")
+        if not validate_schema():
+            logger.error("❌ Database schema validation failed")
+            logger.info("Try deleting the database file and running again:")
+            logger.info(f"  rm {DATABASE_PATH}")
+            sys.exit(1)
+        logger.success("✓ Database schema validated")
 
     parser = argparse.ArgumentParser(description="UCG-23 ETL Pipeline")
     parser.add_argument("--step", type=int, help="Run a specific step 0–8")

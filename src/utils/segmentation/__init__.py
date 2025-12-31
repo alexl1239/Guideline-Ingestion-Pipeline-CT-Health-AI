@@ -25,8 +25,8 @@ from src.utils.segmentation.toc_parser import (
 
 from src.utils.segmentation.hierarchy_builder import (
     identify_chapters,
-    identify_diseases,
-    identify_subsections,
+    identify_diseases_from_toc,
+    identify_subsections_from_toc_and_headers,
     build_heading_path,
     assign_blocks_to_sections,
     build_complete_hierarchy,
@@ -50,8 +50,8 @@ __all__ = [
     'get_toc_summary',
     # hierarchy_builder
     'identify_chapters',
-    'identify_diseases',
-    'identify_subsections',
+    'identify_diseases_from_toc',
+    'identify_subsections_from_toc_and_headers',
     'build_heading_path',
     'assign_blocks_to_sections',
     'build_complete_hierarchy',
