@@ -76,7 +76,9 @@ def _export_section_tree(sections: List[Dict[str, Any]], output_path: Path) -> N
         f.write("## Statistics\n\n")
         f.write(f"- Level 1 (Chapters): {level_counts.get(1, 0)}\n")
         f.write(f"- Level 2 (Diseases/Topics): {level_counts.get(2, 0)}\n")
-        f.write(f"- Level 3+ (Subsections): {sum(c for l, c in level_counts.items() if l >= 3)}\n\n")
+        f.write(f"- Level 3 (Numbered subsections / Standard subsections under L2): {level_counts.get(3, 0)}\n")
+        f.write(f"- Level 4 (Numbered sub-subsections / Standard subsections under L3): {level_counts.get(4, 0)}\n")
+        f.write(f"- Level 5 (Standard subsections under L4): {level_counts.get(5, 0)}\n\n")
 
         f.write("## Hierarchy\n\n")
 

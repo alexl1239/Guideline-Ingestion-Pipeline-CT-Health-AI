@@ -64,12 +64,101 @@ def extract_toc_from_docling(docling_json: Dict[str, Any]) -> List[Dict[str, Any
 
     if toc_entries:
         logger.info(f"Found explicit ToC with {len(toc_entries)} entries")
+        # Detect and apply page offset to convert from printed to PDF page numbers
+        toc_entries = _apply_page_offset(toc_entries, docling_json)
         return toc_entries
 
     # Fallback: extract section headers as pseudo-ToC
     logger.warning("No explicit ToC found, falling back to section header extraction")
     toc_entries = _extract_section_headers_as_toc(docling_json)
     logger.info(f"Extracted {len(toc_entries)} section headers as ToC entries")
+
+    return toc_entries
+
+
+def _apply_page_offset(
+    toc_entries: List[Dict[str, Any]],
+    docling_json: Dict[str, Any]
+) -> List[Dict[str, Any]]:
+    """
+    Detect and apply page offset between ToC (printed) pages and PDF pages.
+
+    ToC often uses printed page numbers which don't account for front matter.
+    This function detects the offset by finding the first chapter header
+    in the actual document and comparing its PDF page to the ToC page.
+
+    Args:
+        toc_entries: List of ToC entries with printed page numbers
+        docling_json: Full Docling JSON to find actual header locations
+
+    Returns:
+        ToC entries with corrected PDF page numbers
+    """
+    # Find the first numbered chapter entry
+    first_chapter = None
+    for entry in toc_entries:
+        if entry.get('level') == 1 and entry.get('numbering'):
+            first_chapter = entry
+            break
+
+    if not first_chapter or not first_chapter.get('page'):
+        logger.debug("No first chapter found for page offset detection")
+        return toc_entries
+
+    toc_page = first_chapter['page']
+    numbering = first_chapter['numbering']
+    heading_text = first_chapter['heading']
+
+    # Search for this chapter header in the document's text elements
+    texts = docling_json.get('texts', [])
+    actual_page = None
+
+    # Strategy 1: Look for page_header with "CHAPTER N:" pattern
+    chapter_header_pattern = re.compile(rf'CHAPTER\s+{numbering}[:\s]', re.IGNORECASE)
+
+    for text_elem in texts:
+        text_content = text_elem.get('text', '').strip()
+        label = text_elem.get('label', '')
+
+        if label == 'page_header' and chapter_header_pattern.search(text_content):
+            prov = text_elem.get('prov', [])
+            if prov:
+                actual_page = prov[0].get('page_no')
+                break
+
+    # Strategy 2: Look for section_header matching the ToC heading text
+    if not actual_page:
+        # Normalize heading for matching (first few words)
+        heading_words = heading_text.upper().split()[:3]
+        for text_elem in texts:
+            text_content = text_elem.get('text', '').strip()
+            label = text_elem.get('label', '')
+
+            if label == 'section_header':
+                text_words = text_content.upper().split()[:3]
+                # Check if first few words match
+                if text_words == heading_words or (len(text_words) >= 2 and text_words[:2] == heading_words[:2]):
+                    prov = text_elem.get('prov', [])
+                    if prov:
+                        actual_page = prov[0].get('page_no')
+                        break
+
+    if not actual_page:
+        logger.debug(f"Could not find chapter '{numbering}' header in document")
+        return toc_entries
+
+    # Calculate offset
+    offset = actual_page - toc_page
+    if offset == 0:
+        logger.debug("No page offset detected")
+        return toc_entries
+
+    logger.info(f"Detected page offset: {offset} (ToC page {toc_page} -> PDF page {actual_page})")
+
+    # Apply offset to all entries
+    for entry in toc_entries:
+        if entry.get('page') is not None:
+            entry['page'] = entry['page'] + offset
 
     return toc_entries
 
