@@ -30,7 +30,14 @@
       "Bash(./venv/bin/pytest tests/unit/ -v)",
       "Bash(./venv/bin/pytest tests/ --collect-only -q)",
       "Bash(./venv/bin/pytest tests/ -v --tb=short)",
-      "Bash(./venv/bin/pytest tests/integration/test_step1_parsing.py::TestStep1OutputQuality::test_block_type_distribution_is_plausible -xvs)"
+      "Bash(./venv/bin/pytest tests/integration/test_step1_parsing.py::TestStep1OutputQuality::test_block_type_distribution_is_plausible -xvs)",
+      "Bash(./venv/bin/pytest tests/unit/test_heading_patterns.py -v)",
+      "Bash(./venv/bin/pytest tests/integration/test_database_schema.py -v --tb=short)",
+      "Bash(./venv/bin/pytest tests/unit/test_toc_parser.py -v)",
+      "Bash(./venv/bin/pytest tests/unit/ -v --tb=short)",
+      "Bash(PYTHONPATH=/Users/alexluo/Desktop/GitHub/ucg23-rag-etl-pipeline ./venv/bin/python:*)",
+      "Bash(./venv/bin/pytest tests/unit/test_hierarchy_builder.py -v --tb=short)",
+      "Bash(chmod:*)"
     ],
     "deny": [],
     "ask": []
