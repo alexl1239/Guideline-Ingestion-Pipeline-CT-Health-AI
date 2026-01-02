@@ -36,7 +36,8 @@
       "Bash(./venv/bin/pytest tests/unit/test_toc_parser.py -v)",
       "Bash(./venv/bin/pytest tests/unit/ -v --tb=short)",
       "Bash(PYTHONPATH=/Users/alexluo/Desktop/GitHub/ucg23-rag-etl-pipeline ./venv/bin/python:*)",
-      "Bash(./venv/bin/pytest tests/unit/test_hierarchy_builder.py -v --tb=short)"
+      "Bash(./venv/bin/pytest tests/unit/test_hierarchy_builder.py -v --tb=short)",
+      "Bash(chmod:*)"
     ],
     "deny": [],
     "ask": []
