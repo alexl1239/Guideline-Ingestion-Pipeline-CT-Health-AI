@@ -116,7 +116,7 @@ def _get_all_raw_blocks(document_id: str) -> List[Dict[str, Any]]:
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT id, page_number, block_type
+            SELECT id, page_number, block_type, text_content
             FROM raw_blocks
             WHERE document_id = ?
             ORDER BY page_number, id
@@ -130,6 +130,7 @@ def _get_all_raw_blocks(document_id: str) -> List[Dict[str, Any]]:
                 'id': row[0],
                 'page_number': row[1],
                 'block_type': row[2],
+                'text_content': row[3],
             })
 
         return blocks
