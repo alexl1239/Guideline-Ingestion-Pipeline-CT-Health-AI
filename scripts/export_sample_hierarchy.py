@@ -48,6 +48,79 @@ def get_raw_blocks(cursor, section_id):
     return cursor.execute(query, (section_id,)).fetchall()
 
 
+def get_parent_section(cursor, section):
+    """Get the parent section by parsing heading_path."""
+    heading_path = section[3]  # heading_path
+    current_level = section[1]  # level
+
+    if current_level == 1:
+        return None  # Top level has no parent
+
+    # Parse parent from heading_path (everything before the last ">")
+    parts = heading_path.split(" > ")
+    if len(parts) <= 1:
+        return None
+
+    parent_path = " > ".join(parts[:-1])
+
+    query = """
+    SELECT id, level, heading, heading_path
+    FROM sections
+    WHERE heading_path = ?
+    """
+    return cursor.execute(query, (parent_path,)).fetchone()
+
+
+def get_sibling_sections(cursor, section, context_range=5):
+    """Get sibling sections (same level, nearby in order)."""
+    current_level = section[1]
+    current_order = section[6]  # order_index
+    heading_path = section[3]
+
+    # Determine parent path for filtering siblings
+    parts = heading_path.split(" > ")
+    if len(parts) > 1:
+        parent_path_prefix = " > ".join(parts[:-1]) + " > "
+    else:
+        parent_path_prefix = ""
+
+    query = """
+    SELECT id, level, heading, heading_path, order_index
+    FROM sections
+    WHERE level = ?
+      AND heading_path LIKE ?
+      AND order_index BETWEEN ? AND ?
+    ORDER BY order_index
+    """
+
+    return cursor.execute(query, (
+        current_level,
+        parent_path_prefix + "%",
+        current_order - context_range,
+        current_order + context_range
+    )).fetchall()
+
+
+def get_child_sections(cursor, section):
+    """Get immediate child sections (one level deeper)."""
+    heading_path = section[3]
+    current_level = section[1]
+
+    query = """
+    SELECT id, level, heading, heading_path, order_index,
+           (SELECT COUNT(*) FROM raw_blocks WHERE section_id = sections.id) as block_count
+    FROM sections
+    WHERE level = ?
+      AND heading_path LIKE ?
+    ORDER BY order_index
+    """
+
+    return cursor.execute(query, (
+        current_level + 1,
+        heading_path + " > %"
+    )).fetchall()
+
+
 def format_metadata(metadata_str):
     """Format metadata JSON for display."""
     if not metadata_str or metadata_str == '{}':
@@ -59,7 +132,7 @@ def format_metadata(metadata_str):
         return metadata_str
 
 
-def export_to_markdown(section, raw_blocks, output_file=None):
+def export_to_markdown(section, raw_blocks, cursor, output_file=None):
     """Export section hierarchy and raw blocks to markdown."""
     lines = []
 
@@ -80,6 +153,43 @@ def export_to_markdown(section, raw_blocks, output_file=None):
     lines.append(f"**Full Path:** {section[3]}")
     lines.append(f"**Pages:** {section[4]}–{section[5]}")
     lines.append(f"**Order Index:** {section[6]}")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+
+    # Hierarchy Context
+    lines.append("## Hierarchy Context")
+    lines.append("")
+
+    # Parent section
+    parent = get_parent_section(cursor, section)
+    if parent:
+        lines.append(f"**Parent Section:** `{parent[0]}` - {parent[2]}")
+    else:
+        lines.append("**Parent Section:** *(none - top level)*")
+    lines.append("")
+
+    # Sibling sections
+    siblings = get_sibling_sections(cursor, section, context_range=10)
+    lines.append("**Sibling Sections** (same level):")
+    if siblings:
+        for sib_id, sib_level, sib_heading, sib_path, sib_order in siblings:
+            if sib_id == section[0]:
+                lines.append(f"- `{sib_id}` - **{sib_heading}** ← **(current)**")
+            else:
+                lines.append(f"- `{sib_id}` - {sib_heading}")
+    else:
+        lines.append("*(none found)*")
+    lines.append("")
+
+    # Child sections
+    children = get_child_sections(cursor, section)
+    lines.append("**Child Sections** (one level deeper):")
+    if children:
+        for child_id, child_level, child_heading, child_path, child_order, block_count in children:
+            lines.append(f"- `{child_id}` - {child_heading} ({block_count} blocks)")
+    else:
+        lines.append("*(none)*")
     lines.append("")
     lines.append("---")
     lines.append("")
@@ -196,7 +306,7 @@ def main():
         print(f"Warning: No raw blocks found for section {section_id}", file=sys.stderr)
 
     # Export
-    export_to_markdown(section, raw_blocks, output_file)
+    export_to_markdown(section, raw_blocks, cursor, output_file)
 
     conn.close()
 
