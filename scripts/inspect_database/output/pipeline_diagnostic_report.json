@@ -1,0 +1,25 @@
+{
+  "document_id": "4e2ce587-fc2c-4f79-8f2f-8ac25d5252b0",
+  "timestamp": "2026-01-04 16:12:09",
+  "raw_blocks_count": 20034,
+  "sections_count": 1722,
+  "sections_by_level": {
+    "level_1": 24,
+    "level_2": 76,
+    "level_3": 384,
+    "level_4": 1098,
+    "level_5": 140
+  },
+  "parent_chunks_count": 236,
+  "step3_stats": {
+    "document_id": "4e2ce587-fc2c-4f79-8f2f-8ac25d5252b0",
+    "sections_processed": 76,
+    "parent_chunks_created": 236,
+    "token_min": 41,
+    "token_max": 1998,
+    "token_median": 1522.0,
+    "token_mean": 1367.7161016949153,
+    "chunks_over_limit": 0,
+    "duration_seconds": 1.6178698539733887
+  }
+}
