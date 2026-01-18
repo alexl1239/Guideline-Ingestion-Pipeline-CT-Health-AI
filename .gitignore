@@ -1,6 +1,31 @@
-# Input/ Output files
-data/
-logs/
+# Input/ Output files - ignore contents but keep directory structure
+# Raw input data (sensitive/copyrighted medical documents)
+data/ucg23_raw/*.pdf
+
+# Generated database files
+data/*.db
+data/*.db-shm
+data/*.db-wal
+
+# Generated pipeline outputs
+data/docling_outputs/*
+data/exports/*
+data/intermediate/*
+data/qa_reports/*
+
+# Keep directory structure with .gitkeep files
+!data/ucg23_raw/.gitkeep
+!data/docling_outputs/.gitkeep
+!data/exports/.gitkeep
+!data/intermediate/.gitkeep
+!data/qa_reports/.gitkeep
+!data/README.md
+
+# Logs directory - ignore contents but keep structure
+logs/*
+!logs/.gitkeep
+
+# Legacy files
 Extraction_Process_v3.md
 
 # Test outputs (keep for inspection, regenerate as needed)
