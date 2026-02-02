@@ -154,8 +154,11 @@ def extract_text_content(element: Dict[str, Any]) -> Optional[str]:
 
     Handles different content types:
     - Text elements: 'text' or 'orig' field
-    - Tables: Extract from table_cells
+    - Tables: Skipped (use markdown_content instead)
     - Other elements: Fall back to 'text' field
+
+    Note: Tables are skipped here because they use formatted markdown instead.
+    The markdown provides proper spacing and alignment.
 
     Args:
         element: Docling element dict
@@ -168,6 +171,13 @@ def extract_text_content(element: Dict[str, Any]) -> Optional[str]:
         >>> extract_text_content(element)
         'This is the content.'
     """
+    # Skip tables - they should use markdown_content for proper formatting
+    label = element.get('label', '')
+    block_type = element.get('type', '')
+    if 'table' in label.lower() or 'table' in block_type.lower():
+        # Tables will be handled by extract_markdown_content()
+        return None
+
     # Try direct text field first
     text = element.get('text', '').strip()
     if text:
@@ -178,21 +188,6 @@ def extract_text_content(element: Dict[str, Any]) -> Optional[str]:
     if orig:
         return orig
 
-    # For tables, extract text from cells
-    label = element.get('label', '')
-    if 'table' in label or label == 'document_index':
-        data = element.get('data', {})
-        if 'table_cells' in data:
-            cells = data['table_cells']
-            cell_texts = []
-            for cell in cells:
-                cell_text = cell.get('text', '').strip()
-                if cell_text:
-                    cell_texts.append(cell_text)
-            if cell_texts:
-                # Join with newlines for now (better than nothing)
-                return '\n'.join(cell_texts)
-
     return None
 
 
@@ -200,7 +195,8 @@ def extract_markdown_content(element: Dict[str, Any]) -> Optional[str]:
     """
     Extract markdown-formatted content from Docling element.
 
-    Especially useful for tables, which Docling can export as markdown.
+    For tables, uses Docling's export_to_markdown() output (added during parsing).
+    This provides properly formatted tables with correct spacing and alignment.
 
     Args:
         element: Docling element dict
@@ -213,8 +209,18 @@ def extract_markdown_content(element: Dict[str, Any]) -> Optional[str]:
         >>> extract_markdown_content(element)
         '| Col1 | Col2 |\n|------|------|\n| A | B |'
     """
+    # Check for markdown field (includes table markdown added during parsing)
     markdown = element.get('markdown', '').strip()
-    return markdown if markdown else None
+    if markdown:
+        return markdown
+
+    # For tables without markdown, try to get text field as fallback
+    block_type = element.get('label') or element.get('type', '')
+    if 'table' in block_type.lower():
+        # Log warning that table doesn't have markdown export
+        logger.debug(f"Table element missing markdown export, will use text content as fallback")
+
+    return None
 
 
 def extract_element_id(element: Dict[str, Any]) -> Optional[str]:

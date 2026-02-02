@@ -5,7 +5,7 @@ Loads configuration from environment variables (.env file) and validates
 that all required settings are present. Includes model settings, API keys,
 file paths, and batch processing parameters.
 """
-
+2
 import os
 import sys
 from pathlib import Path
@@ -148,12 +148,54 @@ LARGE_TABLE_COL_THRESHOLD = 10
 # Project root directory
 PROJECT_ROOT = Path(__file__).parent.parent
 
-# Source PDF file (Docling has no page limit, so single file processing)
-SOURCE_PDF_PATH = PROJECT_ROOT / "data" / "ucg23_raw" / "Uganda_Clinical_Guidelines_2023.pdf"
+# Source PDFs directory (contains all guideline PDFs)
+SOURCE_PDFS_DIR = PROJECT_ROOT / "data" / "source_pdfs"
+
+# ===================================
+# ACTIVE DOCUMENT SELECTION
+# ===================================
+# To process a different document, change ACTIVE_PDF below
+#
+# Available PDFs in data/source_pdfs/:
+#   - Uganda_Clinical_Guidelines_2023.pdf
+#   - National integrated Community Case Management (iCCM) guidelines.pdf
+# ===================================
+
+# Active document (change this to switch documents)
+ACTIVE_PDF = "National integrated Community Case Management (iCCM) guidelines.pdf"
+
+# Resolve active PDF path
+SOURCE_PDF_PATH = SOURCE_PDFS_DIR / ACTIVE_PDF
 
 
-# Output database
-DATABASE_PATH = PROJECT_ROOT / "data" / "ucg23_rag.db"
+# Helper function: Generate database filename from PDF filename
+def get_database_name_from_pdf(pdf_filename: str) -> str:
+    """
+    Generate database filename from PDF filename.
+
+    Simple approach: Remove .pdf extension and add _rag.db
+
+    Examples:
+        "Uganda_Clinical_Guidelines_2023.pdf" -> "Uganda_Clinical_Guidelines_2023_rag.db"
+        "iCCM_guidelines.pdf" -> "iCCM_guidelines_rag.db"
+
+    Args:
+        pdf_filename: Name of the PDF file
+
+    Returns:
+        Database filename with _rag.db suffix
+    """
+    if pdf_filename.endswith('.pdf'):
+        base_name = pdf_filename[:-4]  # Remove .pdf
+    else:
+        base_name = pdf_filename
+
+    return f"{base_name}_rag.db"
+
+
+# Output database (auto-generated from active PDF name)
+DATABASE_NAME = get_database_name_from_pdf(ACTIVE_PDF)
+DATABASE_PATH = PROJECT_ROOT / "data" / DATABASE_NAME
 
 # Intermediate processing directories
 INTERMEDIATE_DIR = PROJECT_ROOT / "data" / "intermediate"
@@ -249,9 +291,24 @@ def validate_configuration():
     if EMBEDDING_BATCH_SIZE <= 0:
         errors.append(f"EMBEDDING_BATCH_SIZE must be positive, got {EMBEDDING_BATCH_SIZE}")
 
-    # Validate source PDF exists
+    # Validate source PDFs directory exists
+    if not SOURCE_PDFS_DIR.exists():
+        errors.append(f"Source PDFs directory not found: {SOURCE_PDFS_DIR}")
+
+    # Validate active PDF exists
     if not SOURCE_PDF_PATH.exists():
-        errors.append(f"Source PDF not found: {SOURCE_PDF_PATH}")
+        # List available PDFs to help user
+        available_pdfs = []
+        if SOURCE_PDFS_DIR.exists():
+            available_pdfs = [f.name for f in SOURCE_PDFS_DIR.glob("*.pdf")]
+
+        error_msg = f"Active PDF not found: {SOURCE_PDF_PATH}\n"
+        error_msg += f"  Set via ACTIVE_PDF environment variable: '{ACTIVE_PDF}'\n"
+        if available_pdfs:
+            error_msg += f"  Available PDFs in {SOURCE_PDFS_DIR}:\n"
+            for pdf in available_pdfs:
+                error_msg += f"    - {pdf}\n"
+        errors.append(error_msg.rstrip())
 
     # Create required directories if they don't exist
     for directory in [INTERMEDIATE_DIR, EXPORTS_DIR, QA_REPORTS_DIR, LOGS_DIR]:
@@ -323,9 +380,12 @@ def print_configuration():
     print(f"  Parsing: {PARSING_BATCH_SIZE} blocks")
     print(f"  Cleanup/Tables: {CLEANUP_BATCH_SIZE}/{TABLE_BATCH_SIZE} sections")
     print(f"  Embeddings: {EMBEDDING_BATCH_SIZE} chunks")
+    print(f"\nActive Document:")
+    print(f"  PDF: {ACTIVE_PDF} ({'exists' if SOURCE_PDF_PATH.exists() else 'missing'})")
+    print(f"  Database: {DATABASE_NAME}")
+    print(f"  Path: {DATABASE_PATH}")
     print(f"\nFile Paths:")
-    print(f"  Source PDF: {SOURCE_PDF_PATH.name} ({'exists' if SOURCE_PDF_PATH.exists() else 'missing'})")
-    print(f"  Database: {DATABASE_PATH}")
+    print(f"  Source PDFs Directory: {SOURCE_PDFS_DIR}")
     print(f"\nDirectories:")
     print(f"  Intermediate: {INTERMEDIATE_DIR}")
     print(f"  Exports: {EXPORTS_DIR}")
@@ -362,12 +422,17 @@ __all__ = [
     "LARGE_TABLE_COL_THRESHOLD",
     # File paths
     "PROJECT_ROOT",
+    "SOURCE_PDFS_DIR",
+    "ACTIVE_PDF",
     "SOURCE_PDF_PATH",
+    "DATABASE_NAME",
     "DATABASE_PATH",
     "INTERMEDIATE_DIR",
     "EXPORTS_DIR",
     "QA_REPORTS_DIR",
     "LOGS_DIR",
+    # Helper functions
+    "get_database_name_from_pdf",
     # Docling config
     "DOCLING_VERSION",
     # QA settings

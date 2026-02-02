@@ -2,6 +2,9 @@
 Segmentation Utilities (Step 2)
 
 Utilities for structural segmentation and hierarchy building.
+
+This module uses Docling's native hierarchy detection for robust section
+extraction without fragile ToC parsing.
 """
 
 from src.utils.segmentation.heading_patterns import (
@@ -15,22 +18,19 @@ from src.utils.segmentation.heading_patterns import (
     STANDARD_SUBSECTIONS,
 )
 
-from src.utils.segmentation.toc_parser import (
-    extract_toc_from_docling,
-    parse_toc_entry,
-    infer_toc_level,
-    validate_toc_entries,
-    get_toc_summary,
+# Native hierarchy extraction
+from src.utils.segmentation.native_hierarchy import (
+    extract_native_hierarchy,
+    build_section_tree,
+    assign_page_ranges,
+    build_heading_paths,
+    validate_hierarchy,
+    get_hierarchy_summary,
 )
 
+# Block assignment utility (still needed for assigning blocks to sections)
 from src.utils.segmentation.hierarchy_builder import (
-    identify_chapters,
-    identify_diseases_from_toc,
-    identify_numbered_subsections_from_toc,
-    identify_standard_subsections_from_headers,
-    build_heading_path,
     assign_blocks_to_sections,
-    build_complete_hierarchy,
 )
 
 __all__ = [
@@ -43,18 +43,13 @@ __all__ = [
     'normalize_heading_text',
     'get_heading_confidence_category',
     'STANDARD_SUBSECTIONS',
-    # toc_parser
-    'extract_toc_from_docling',
-    'parse_toc_entry',
-    'infer_toc_level',
-    'validate_toc_entries',
-    'get_toc_summary',
-    # hierarchy_builder
-    'identify_chapters',
-    'identify_diseases_from_toc',
-    'identify_numbered_subsections_from_toc',
-    'identify_standard_subsections_from_headers',
-    'build_heading_path',
+    # native_hierarchy
+    'extract_native_hierarchy',
+    'build_section_tree',
+    'assign_page_ranges',
+    'build_heading_paths',
+    'validate_hierarchy',
+    'get_hierarchy_summary',
+    # hierarchy_builder (only assign_blocks_to_sections is still used)
     'assign_blocks_to_sections',
-    'build_complete_hierarchy',
 ]

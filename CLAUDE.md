@@ -44,6 +44,26 @@ python src/pipeline/step6_embeddings.py
 python src/pipeline/step7_qa.py
 ```
 
+**⚠️ IMPORTANT - Testing and Development:**
+
+When testing pipeline changes, **ALWAYS use the short iCCM document** (114 pages), NOT the full UCG-23 document (1091 pages):
+
+```python
+# In src/config.py, set:
+ACTIVE_PDF = "National integrated Community Case Management (iCCM) guidelines.pdf"
+```
+
+**Why:**
+- Step 1 (Docling parsing) takes 5-10 minutes on UCG-23 (1091 pages)
+- Step 1 on iCCM takes ~30 seconds (114 pages)
+- Once raw_blocks are generated, you can test Steps 2-7 repeatedly without re-parsing
+- **Only re-run Step 1 if you changed the parser code or table export logic**
+
+**Best Practice:**
+1. Test changes on iCCM first (fast iteration)
+2. Once working, verify on UCG-23 (full validation)
+3. Never re-run Step 1 on UCG-23 unless absolutely necessary
+
 ## Database Inspection
 
 ```bash
@@ -109,19 +129,20 @@ The pipeline is an **8-step sequential ETL process** where each step writes to S
 - `page_header`, `page_footer` - Running headers/footers (filtered in Step 3)
 
 #### Step 2: Structural Segmentation
-- Reconstruct logical hierarchy: Chapters → Diseases → Subsections
-- Use regex patterns for numbered headings: `^\d+(\.\d+)*\s+`
-- Fuzzy match ToC entries to heading candidates
-- Identify standard disease subsections: Definition, Causes, Risk factors, Clinical features, Complications, Differential diagnosis, Investigations, Management, Prevention
-- **LLM reconciliation**: Only for problematic areas (missing subsections, level inconsistencies, ambiguous patterns, sections >10 pages without headings)
+- **Uses Docling's native hierarchy detection** - No ToC parsing required
+- Extracts section hierarchy directly from Docling's layout analysis
+- Uses native `level` field from `section_header` elements (1=chapter, 2=disease, 3+=subsection)
+- Builds heading paths automatically from document structure
+- Calculates page ranges based on section ordering
 - **Transaction**: Single transaction per chapter
 - **Output**: Populates `sections` table with hierarchy
 
-**LLM Prompt Constraints** (when needed):
-- Output ONLY JSON: `[{"heading": "...", "level": N}, ...]`
-- Do NOT modify heading text
-- Do NOT add content or reorder sections
-- Levels: 1=chapter, 2=disease, 3+=subsection
+**Key Benefits of Native Hierarchy:**
+- ✅ No OCR errors from ToC parsing (fixes section 23.2.4 bug)
+- ✅ No page offset calculations needed
+- ✅ No fuzzy matching required
+- ✅ Works across different document formats
+- ✅ More robust and maintainable (~100 lines of code removed)
 
 #### Step 3: Cleanup and Parent Chunk Construction
 - Remove noise: page markers, headers/footers

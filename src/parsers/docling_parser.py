@@ -112,9 +112,25 @@ class DoclingParser(BaseParser):
             markdown_text = doc.export_to_markdown()
             self.logger.success(f"✓ Markdown exported ({len(markdown_text):,} chars)")
 
-            # 4. Export structured JSON dict
+            # 4. Export structured JSON dict with table markdown
             self.logger.info("Exporting to structured JSON...")
             doc_json = doc.export_to_dict()
+
+            # Add formatted markdown for tables
+            if 'tables' in doc_json:
+                self.logger.info(f"Adding markdown export for {len(doc_json['tables'])} tables...")
+                for i, table_item in enumerate(doc.tables):
+                    try:
+                        # Export table to markdown using Docling's built-in method
+                        table_markdown = table_item.export_to_markdown()
+                        # Add to the corresponding table in JSON
+                        if i < len(doc_json['tables']):
+                            doc_json['tables'][i]['markdown'] = table_markdown
+                    except Exception as e:
+                        self.logger.warning(f"Could not export table {i} to markdown: {e}")
+
+                self.logger.success("✓ Table markdown added")
+
             self.logger.success("✓ JSON structure exported")
 
             # 5. Count pages
