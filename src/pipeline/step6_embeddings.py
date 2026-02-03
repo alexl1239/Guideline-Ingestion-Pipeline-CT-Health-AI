@@ -2,6 +2,8 @@
 STEP 6 — EMBEDDING GENERATION
 
 Generates vector embeddings for child chunks using OpenAI text-embedding-3-small.
+
+Document-agnostic: Works with any clinical guideline document.
 """
 
 from src.utils.logging_config import logger

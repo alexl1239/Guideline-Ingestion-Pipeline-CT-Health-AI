@@ -23,10 +23,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from docling.document_converter import DocumentConverter
+from docling.document_converter import DocumentConverter, PdfFormatOption
+from docling.datamodel.base_models import InputFormat
+
+VLM_AVAILABLE = True  # VLM is available in Docling 2.0+
 
 from src.utils.logging_config import logger
-from src.config import DOCLING_VERSION
+from src.config import DOCLING_VERSION, USE_DOCLING_VLM, DOCLING_TABLE_MODE
 from src.parsers.base import BaseParser, ParseResult
 
 
@@ -46,21 +49,67 @@ class DoclingParser(BaseParser):
 
     def __init__(self) -> None:
         """
-        Initialize Docling parser with default configuration.
+        Initialize Docling parser with configuration.
 
-        Uses Docling's default settings:
+        Configuration options:
+        - VLM (Vision Language Model): Enhanced image understanding with picture descriptions
+        - Table mode: "fast" or "accurate" for table extraction
         - OCR enabled via Tesseract for scanned pages
-        - Default layout analysis model
         - Automatic multi-page table reconstruction
         """
         super().__init__()
         self.logger.info(f"Initializing Docling parser (version {DOCLING_VERSION})")
 
+        # Track whether VLM was actually enabled
+        self._vlm_enabled = False
+
         try:
-            self._converter = DocumentConverter()
-            self.logger.success("Docling DocumentConverter initialized successfully")
+            if USE_DOCLING_VLM:
+                self.logger.info(f"VLM requested with table mode: {DOCLING_TABLE_MODE}")
+                self.logger.warning("VLM mode will significantly increase processing time (3-5x slower)")
+
+                # Create PdfFormatOption with VLM settings
+                pdf_options = PdfFormatOption()
+
+                # Get existing pipeline options and modify them
+                pipeline_opts = pdf_options.pipeline_options
+
+                # Enable VLM picture description
+                pipeline_opts.do_picture_description = True
+                pipeline_opts.do_picture_classification = True
+                self.logger.info("✓ VLM picture description enabled")
+
+                # Configure table structure mode
+                from docling.datamodel.pipeline_options import TableFormerMode
+                if DOCLING_TABLE_MODE == "accurate":
+                    pipeline_opts.table_structure_options.mode = TableFormerMode.ACCURATE
+                    self.logger.info("✓ Table extraction: accurate mode")
+                else:
+                    pipeline_opts.table_structure_options.mode = TableFormerMode.FAST
+                    self.logger.info("✓ Table extraction: fast mode")
+
+                # Ensure table structure and OCR are enabled
+                pipeline_opts.do_table_structure = True
+                pipeline_opts.do_ocr = True
+
+                # Create converter with custom options
+                self._converter = DocumentConverter(
+                    format_options={InputFormat.PDF: pdf_options}
+                )
+
+                self._vlm_enabled = True
+                self.logger.success("✓ Docling DocumentConverter initialized with VLM")
+
+            else:
+                # Use default configuration
+                self.logger.info("Using default parsing mode (VLM disabled)")
+                self._converter = DocumentConverter()
+                self._vlm_enabled = False
+                self.logger.success("✓ Docling DocumentConverter initialized (default mode)")
+
         except Exception as e:
             self.logger.error(f"Failed to initialize Docling: {e}")
+            self.logger.exception("Full traceback:")
             raise RuntimeError(f"Docling initialization failed: {e}") from e
 
         # Create output directory for saving markdown and JSON
@@ -121,8 +170,8 @@ class DoclingParser(BaseParser):
                 self.logger.info(f"Adding markdown export for {len(doc_json['tables'])} tables...")
                 for i, table_item in enumerate(doc.tables):
                     try:
-                        # Export table to markdown using Docling's built-in method
-                        table_markdown = table_item.export_to_markdown()
+                        # Export table to markdown using Docling's built-in method (pass doc to avoid deprecation warning)
+                        table_markdown = table_item.export_to_markdown(doc=doc)
                         # Add to the corresponding table in JSON
                         if i < len(doc_json['tables']):
                             doc_json['tables'][i]['markdown'] = table_markdown
@@ -141,7 +190,13 @@ class DoclingParser(BaseParser):
             # 6. Save outputs to files for inspection
             self._save_outputs(pdf_path.stem, markdown_text, doc_json)
 
-            # 7. Return ParseResult
+            # 7. Log VLM status
+            if self._vlm_enabled:
+                self.logger.success("✓ VLM was ENABLED for this parse (picture descriptions active)")
+            else:
+                self.logger.info("ℹ VLM was DISABLED for this parse (default mode)")
+
+            # 8. Return ParseResult
             self.logger.success(f"✓ Parse complete: {num_pages} pages, {len(markdown_text):,} chars")
 
             return ParseResult(

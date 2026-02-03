@@ -1,7 +1,7 @@
 """
 STEP 0 — DOCUMENT REGISTRATION
 
-Registers the UCG-23 PDF in the SQLite database with complete provenance:
+Registers clinical guideline PDFs in the SQLite database with complete provenance:
 - SHA-256 checksum for data integrity
 - Full PDF bytes stored for self-contained database
 - UUID generation for unique document identification
@@ -9,7 +9,9 @@ Registers the UCG-23 PDF in the SQLite database with complete provenance:
 - Embedding metadata registration
 - Comprehensive error handling and logging
 
-Input: data/Uganda_Clinical_Guidelines_2023.pdf
+Document-agnostic: Works with any clinical guideline PDF specified in config.
+
+Input: PDF file specified in config (SOURCE_PDF_PATH)
 Output: Document record in SQLite with metadata
 """
 
@@ -185,6 +187,10 @@ def run() -> str:
 
             # Insert into documents table
             logger.info("Inserting document record...")
+
+            # Extract document title from filename (remove .pdf extension)
+            doc_title = PDF_PATH.stem
+
             cursor.execute(
                 """
                 INSERT INTO documents (
@@ -195,9 +201,9 @@ def run() -> str:
                 """,
                 (
                     document_id,
-                    "Uganda Clinical Guidelines",
-                    "UCG 2023",
-                    "https://health.go.ug/guidelines/",
+                    doc_title,
+                    None,  # Version label can be set manually if needed
+                    None,  # Source URL can be set manually if needed
                     checksum,
                     pdf_bytes,
                     None,  # Will be populated in Step 1 (Parsing)
@@ -237,8 +243,7 @@ def run() -> str:
         logger.info("REGISTRATION COMPLETE")
         logger.info("=" * 80)
         logger.info(f"Document ID:        {document_id}")
-        logger.info(f"Title:              Uganda Clinical Guidelines")
-        logger.info(f"Version:            UCG 2023")
+        logger.info(f"Title:              {PDF_PATH.stem}")
         logger.info(f"Checksum (SHA-256): {checksum}")
         logger.info(f"PDF Size:           {file_size_mb:.2f} MB")
         logger.info(f"Embedding Model:    {EMBEDDING_MODEL_NAME}")

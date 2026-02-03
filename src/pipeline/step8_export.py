@@ -2,6 +2,8 @@
 STEP 8 — DATABASE EXPORT
 
 Runs final validation, optimizes database, and generates export metadata.
+
+Document-agnostic: Works with any clinical guideline document.
 """
 
 from src.utils.logging_config import logger

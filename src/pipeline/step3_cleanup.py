@@ -4,12 +4,14 @@ STEP 3 — CLEANUP AND PARENT CHUNK CONSTRUCTION
 Removes noise, normalizes markdown content, and constructs parent chunks
 from raw blocks for RAG retrieval.
 
+Document-agnostic: Works with any clinical guideline document structure.
+
 Process:
 1. Load sections and raw_blocks from database
 2. Filter out page headers/footers (block_type in {page_header, page_footer})
 3. Normalize markdown: bullets, whitespace, heading levels
-4. Insert figure/caption placeholders for clinically important images
-5. Concatenate cleaned blocks per level-2 section (disease/topic)
+4. Insert figure/caption placeholders for important images
+5. Concatenate cleaned blocks per level-2 section (topic)
 6. Split into parent chunks targeting 1000-1500 tokens, hard max 2000
 7. Write parent chunks to database with token counts
 
@@ -111,8 +113,8 @@ def run(
             )
             raise CleanupError("Parent chunks already exist. Use --overwrite to replace.")
 
-    # Get level-2 sections (diseases/topics)
-    logger.info("Loading level-2 sections (diseases/topics)...")
+    # Get level-2 sections (topics)
+    logger.info("Loading level-2 sections (topics)...")
     sections = get_level2_sections(doc_id)
 
     if not sections:

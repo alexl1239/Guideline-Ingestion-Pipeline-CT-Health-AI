@@ -2,6 +2,8 @@
 STEP 5 — CHILD CHUNKING
 
 Splits parent chunks into child chunks (256 tokens) for retrieval.
+
+Document-agnostic: Works with any clinical guideline document.
 """
 
 from src.utils.logging_config import logger

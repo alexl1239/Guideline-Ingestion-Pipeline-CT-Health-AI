@@ -2,22 +2,20 @@
 Native Hierarchy Extractor for Docling
 
 Uses Docling's native layout analysis to extract section hierarchy directly
-from parsed elements, eliminating dependency on fragile ToC parsing.
+from parsed elements. This approach is document-agnostic and works across
+different document types.
 
 Key Features:
-- Uses native 'level' field from section_header elements
-- No ToC parsing or regex patterns needed
-- More robust across different document formats
-- Eliminates page offset calculation bugs
+- Trusts Docling's native 'level' field from section_header elements
+- Falls back to numbering inference when native level unavailable
+- No ToC parsing or document-specific patterns needed
+- Works across different document formats and types
 
 Replaces: toc_parser.py, hierarchy_builder.py (ToC-based approach)
 """
 
 from typing import List, Dict, Any, Optional
 from src.utils.logging_config import logger
-from src.utils.segmentation.heading_patterns import (
-    is_standard_subsection,
-)
 
 
 def _extract_page_number(element: Dict[str, Any]) -> Optional[int]:
@@ -241,9 +239,13 @@ def build_section_tree(header_elements: List[Dict[str, Any]]) -> List[Dict[str, 
     """
     Construct section tree from Docling section_header elements.
 
-    Infers hierarchy level from heading numbering patterns, not Docling's
-    unreliable level field. Detects standard subsections (Definition, Management, etc.)
-    and adjusts their levels relative to parent section.
+    Strategy (document-agnostic):
+    1. Primarily trust Docling's native 'level' field from layout analysis
+    2. Fall back to numbering inference if native level unavailable
+    3. Track last seen level for consistency
+
+    This approach works across different document types without needing
+    document-specific patterns or subsection lists.
 
     Args:
         header_elements: List of section_header elements from Docling
@@ -254,7 +256,7 @@ def build_section_tree(header_elements: List[Dict[str, Any]]) -> List[Dict[str, 
     logger.info("Building section tree from headers...")
 
     sections = []
-    last_numbered_level = 1  # Track last numbered section level
+    last_seen_level = 1  # Track last seen level for fallback
 
     for i, element in enumerate(header_elements):
         # Extract basic info
@@ -266,7 +268,7 @@ def build_section_tree(header_elements: List[Dict[str, Any]]) -> List[Dict[str, 
             logger.debug(f"Skipping header {i} with no text")
             continue
 
-        # Get native level from Docling (for metadata only, unreliable)
+        # Get native level from Docling's layout analysis
         native_level = element.get('level')
 
         # Get page number
@@ -276,35 +278,32 @@ def build_section_tree(header_elements: List[Dict[str, Any]]) -> List[Dict[str, 
             logger.warning(f"Header missing page number: {heading_text[:50]}")
             page_num = 0  # Will be handled later
 
-        # Infer level from heading numbering
-        inferred_level = _infer_level_from_numbering(heading_text)
-
-        if inferred_level:
-            # Use inferred level from numbering
-            level = inferred_level
-            last_numbered_level = level
+        # Determine level (prioritize native, fallback to numbering inference)
+        if native_level is not None and native_level > 0:
+            # Trust Docling's native level
+            level = native_level
+            last_seen_level = level
         else:
-            # No numbering - check if standard subsection
-            is_std_subsection = is_standard_subsection(heading_text)
-            if is_std_subsection:
-                # Standard subsections are one level deeper than parent
-                level = last_numbered_level + 1
+            # Fallback: Infer level from heading numbering
+            inferred_level = _infer_level_from_numbering(heading_text)
+            if inferred_level:
+                level = inferred_level
+                last_seen_level = level
             else:
-                # Default to level 1 if can't determine
-                level = 1
+                # No native level and no numbering: assume one level deeper than previous
+                level = min(last_seen_level + 1, 5)  # Cap at level 5
 
         # Create section dict
         section = {
             'heading': heading_text,
-            'level': level,  # Use inferred level, NOT Docling's native level
+            'level': level,
             'page_start': page_num,
             'page_end': page_num,  # Will be calculated later
             'order_index': i,
             'heading_path': '',  # Will be built later
             'metadata': {
                 'native_docling_level': native_level,
-                'inferred_level': level,
-                'is_standard_subsection': is_standard_subsection(heading_text),
+                'inferred_from_numbering': _infer_level_from_numbering(heading_text) is not None,
                 'element_id': element.get('id'),
             }
         }

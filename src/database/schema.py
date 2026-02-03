@@ -1,6 +1,7 @@
 """
-Database Schema Module for UCG-23 RAG ETL Pipeline
+Database Schema Module for Clinical Guideline Ingestion Pipeline
 
+Document-agnostic schema supporting multiple clinical guideline documents.
 Defines the complete SQLite database schema including:
 - Document registration and provenance tracking
 - Hierarchical section structure (chapters, diseases, subsections)

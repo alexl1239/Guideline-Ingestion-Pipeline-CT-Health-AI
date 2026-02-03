@@ -1,6 +1,7 @@
 """
-Configuration Module for UCG-23 RAG ETL Pipeline
+Configuration Module for Clinical Guideline Ingestion Pipeline
 
+Document-agnostic ETL pipeline configuration that supports multiple clinical guideline documents.
 Loads configuration from environment variables (.env file) and validates
 that all required settings are present. Includes model settings, API keys,
 file paths, and batch processing parameters.
@@ -156,9 +157,8 @@ SOURCE_PDFS_DIR = PROJECT_ROOT / "data" / "source_pdfs"
 # ===================================
 # To process a different document, change ACTIVE_PDF below
 #
-# Available PDFs in data/source_pdfs/:
-#   - Uganda_Clinical_Guidelines_2023.pdf
-#   - National integrated Community Case Management (iCCM) guidelines.pdf
+# This pipeline is document-agnostic and can process any clinical guideline PDF.
+# Place your PDF files in data/source_pdfs/ directory.
 # ===================================
 
 # Active document (change this to switch documents)
@@ -221,6 +221,17 @@ DOCLING_VERSION = "2.0.0"  # Update this when upgrading Docling
 # - Automatic multi-page table reconstruction
 # - High-quality layout analysis for accurate reading order
 # - Native identification of page headers/footers for filtering
+
+# VLM (Vision Language Model) Settings
+# Enables advanced vision-based document understanding for better accuracy
+# Trade-off: Significantly slower processing (3-5x) but improved quality
+# Set to True to enable VLM, False to use default lightweight parsing
+USE_DOCLING_VLM = True
+
+# Table extraction mode when VLM is enabled
+# - "fast": Faster processing with good accuracy
+# - "accurate": Slower but highest accuracy for complex tables
+DOCLING_TABLE_MODE = "accurate"  # "fast" or "accurate"
 
 
 # ==================================
@@ -362,7 +373,7 @@ def get_parent_chunk_range() -> tuple[int, int]:
 def print_configuration():
     """Print current configuration (for debugging)."""
     print("\n" + "=" * 80)
-    print("UCG-23 RAG ETL Pipeline Configuration")
+    print("Clinical Guideline Ingestion Pipeline Configuration")
     print("=" * 80)
     print(f"\nAPI Keys:")
     print(f"  OPENAI_API_KEY: {'✓ Set' if OPENAI_API_KEY else '✗ Missing'}")
@@ -370,6 +381,9 @@ def print_configuration():
     print(f"\nParsing Configuration:")
     print(f"  Parser: Docling (offline, open-source)")
     print(f"  Docling Version: {DOCLING_VERSION}")
+    print(f"  VLM Enabled: {'Yes' if USE_DOCLING_VLM else 'No (default)'}")
+    if USE_DOCLING_VLM:
+        print(f"  Table Mode: {DOCLING_TABLE_MODE}")
     print(f"\nModel Configuration:")
     print(f"  Embedding Model: {EMBEDDING_MODEL_NAME}")
     print(f"  Embedding Dimension: {EMBEDDING_DIMENSION}")
@@ -435,6 +449,8 @@ __all__ = [
     "get_database_name_from_pdf",
     # Docling config
     "DOCLING_VERSION",
+    "USE_DOCLING_VLM",
+    "DOCLING_TABLE_MODE",
     # QA settings
     "QA_DISEASE_SAMPLE_PERCENTAGE",
     "QA_EMERGENCY_PROTOCOLS_REQUIRED",

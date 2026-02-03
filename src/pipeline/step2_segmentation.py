@@ -1,8 +1,10 @@
 """
 STEP 2 — STRUCTURAL SEGMENTATION
 
-Reconstructs logical hierarchy (Chapters → Diseases → Subsections) from Docling's
+Reconstructs logical hierarchy (Chapters → Topics → Subsections) from Docling's
 native layout analysis.
+
+Document-agnostic: Works with any clinical guideline document structure.
 
 Process:
 1. Load Docling JSON from database
@@ -10,12 +12,12 @@ Process:
 3. Insert sections into database (transaction per chapter)
 4. Update raw_blocks.section_id for all blocks in each chapter
 5. Export section tree to data/exports/section_tree.md for validation
-6. Log statistics (chapter/disease/subsection counts)
+6. Log statistics (chapter/topic/subsection counts)
 
 Input: Populated raw_blocks table (from Step 1)
 Output: Populated sections table with hierarchical structure
 
-Transaction Boundary: Per chapter (as per CLAUDE.md)
+Transaction Boundary: Per chapter
 
 Note: This uses Docling's native hierarchy detection, eliminating fragile ToC parsing.
 """
@@ -64,7 +66,7 @@ def _export_section_tree(sections: List[Dict[str, Any]], output_path: Path) -> N
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(output_path, 'w', encoding='utf-8') as f:
-        f.write("# UCG-23 Section Hierarchy\n\n")
+        f.write("# Clinical Guideline Section Hierarchy\n\n")
         f.write(f"Total Sections: {len(sections)}\n\n")
 
         # Count by level
@@ -75,7 +77,7 @@ def _export_section_tree(sections: List[Dict[str, Any]], output_path: Path) -> N
 
         f.write("## Statistics\n\n")
         f.write(f"- Level 1 (Chapters): {level_counts.get(1, 0)}\n")
-        f.write(f"- Level 2 (Diseases/Topics): {level_counts.get(2, 0)}\n")
+        f.write(f"- Level 2 (Topics): {level_counts.get(2, 0)}\n")
         f.write(f"- Level 3 (Numbered subsections / Standard subsections under L2): {level_counts.get(3, 0)}\n")
         f.write(f"- Level 4 (Numbered sub-subsections / Standard subsections under L3): {level_counts.get(4, 0)}\n")
         f.write(f"- Level 5 (Standard subsections under L4): {level_counts.get(5, 0)}\n\n")
@@ -282,7 +284,7 @@ def run() -> None:
 
         logger.success(f"✓ Extracted hierarchy with {len(all_sections)} sections:")
         logger.info(f"  - Level 1 (Chapters): {level_counts.get(1, 0)}")
-        logger.info(f"  - Level 2 (Diseases): {level_counts.get(2, 0)}")
+        logger.info(f"  - Level 2 (Topics): {level_counts.get(2, 0)}")
         logger.info(f"  - Level 3+ (Subsections): {sum(c for l, c in level_counts.items() if l >= 3)}")
 
         # Show hierarchy summary
@@ -400,7 +402,7 @@ def run() -> None:
         f"✓ Successfully segmented {total_sections} sections using Docling's native layout analysis"
     )
     logger.info(
-        f"  - {level_counts.get(1, 0)} chapters, {level_counts.get(2, 0)} diseases/topics, "
+        f"  - {level_counts.get(1, 0)} chapters, {level_counts.get(2, 0)} topics, "
         f"{sum(c for l, c in level_counts.items() if l >= 3)} subsections"
     )
     logger.success(f"✓ Assigned {total_blocks_updated} blocks to sections")
