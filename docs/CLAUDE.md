@@ -2,14 +2,48 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Context Awareness for Claude
+
+**IMPORTANT**: This is a multi-guideline ETL pipeline. When the user asks questions about:
+- "the document"
+- "the guideline"
+- "the PDF"
+- "the database"
+- "processing time"
+- "parsing results"
+
+They are referring to the **currently active document** specified in `src/config.py`:
+```python
+ACTIVE_PDF = "..."  # Currently active guideline
+USE_DOCLING_VLM = True/False  # Current VLM setting
+```
+
+**Always check `src/config.py` first** to understand which document and settings are active before answering questions or making changes.
+
 ## Project Overview
 
-This is a production ETL pipeline that converts Uganda Clinical Guidelines 2023 (UCG-23) PDF documents into a single, portable SQLite database with vector search capabilities for offline clinical RAG applications.
+This is a **document-agnostic production ETL pipeline** that converts clinical guideline PDFs into portable SQLite databases with vector search capabilities for offline clinical RAG applications.
 
-**Input**: Single PDF file (Docling has no page limit, processes entire document)
-- `data/ugc23_raw/Uganda_Clinical_Guidelines_2023.pdf`
+**Originally designed for**: Uganda Clinical Guidelines 2023 (UCG-23)
+**Now supports**: Any clinical guideline PDF document
 
-**Output**: `data/ucg23_rag.db` - Single portable SQLite database with `sqlite-vec` embeddings
+### Active Document Configuration
+
+**IMPORTANT**: The currently active guideline being processed is configured in `src/config.py`:
+
+```python
+# src/config.py
+ACTIVE_PDF = "National integrated Community Case Management (iCCM) guidelines.pdf"
+```
+
+When you ask questions about "the document" or "the guideline", you are referring to the **currently active document** specified in `ACTIVE_PDF`.
+
+**Available Guidelines** (in `data/source_pdfs/`):
+1. `Uganda_Clinical_Guidelines_2023.pdf` (1091 pages) - Full UCG-23
+2. `National integrated Community Case Management (iCCM) guidelines.pdf` (114 pages) - Subset for testing
+
+**Input**: Clinical guideline PDF from `data/source_pdfs/{ACTIVE_PDF}`
+**Output**: Auto-generated database: `data/{pdf_name}_rag.db` (e.g., `National integrated Community Case Management (iCCM) guidelines_rag.db`)
 
 ## Environment Setup
 
@@ -27,59 +61,110 @@ pip install -r requirements.txt
 
 **Note**: Docling parser runs fully offline with no API key required.
 
+### Vision Language Model (VLM) Configuration
+
+Docling supports **optional VLM processing** for enhanced document understanding. This is configured in `src/config.py`:
+
+```python
+# src/config.py
+USE_DOCLING_VLM = True          # Enable/disable VLM processing
+DOCLING_TABLE_MODE = "accurate"  # "fast" or "accurate"
+```
+
+**VLM Trade-offs:**
+- **Enabled (True)**: 3-5x slower processing but significantly better accuracy for complex layouts and tables
+- **Disabled (False)**: Fast processing using lightweight models, good for simple documents
+
+**When to use VLM:**
+- Complex multi-column layouts
+- Tables with merged cells or complex structures
+- Documents with mixed content types (figures, equations, diagrams)
+- Production runs requiring highest accuracy
+
+**When to disable VLM:**
+- Quick testing and iteration
+- Simple single-column documents
+- Time-sensitive processing
+
 ## Running the Pipeline
 
 ```bash
-# Run full ETL pipeline (when implemented)
-python src/main.py
+# Run full ETL pipeline
+python -m src.main --all
 
-# Run individual steps sequentially (0 through 7)
-python src/pipeline/step0_registration.py
-python src/pipeline/step1_parsing.py
-python src/pipeline/step2_segmentation.py
-python src/pipeline/step3_cleanup.py
-python src/pipeline/step4_tables.py
-python src/pipeline/step5_chunking.py
-python src/pipeline/step6_embeddings.py
-python src/pipeline/step7_qa.py
+# Run individual steps (0 through 8)
+python -m src.main --step 0  # Document registration
+python -m src.main --step 1  # Parsing with Docling
+python -m src.main --step 2  # Structural segmentation
+python -m src.main --step 3  # Cleanup and parent chunks
+python -m src.main --step 4  # Table linearization
+python -m src.main --step 5  # Child chunking
+python -m src.main --step 6  # Embeddings
+python -m src.main --step 7  # QA validation
+python -m src.main --step 8  # Database export
 ```
 
 **⚠️ IMPORTANT - Testing and Development:**
 
-When testing pipeline changes, **ALWAYS use the short iCCM document** (114 pages), NOT the full UCG-23 document (1091 pages):
+When testing pipeline changes, **ALWAYS use the short iCCM document** (114 pages) for fast iteration:
 
 ```python
 # In src/config.py, set:
 ACTIVE_PDF = "National integrated Community Case Management (iCCM) guidelines.pdf"
+USE_DOCLING_VLM = False  # Optional: disable VLM for even faster testing
 ```
 
-**Why:**
-- Step 1 (Docling parsing) takes 5-10 minutes on UCG-23 (1091 pages)
-- Step 1 on iCCM takes ~30 seconds (114 pages)
-- Once raw_blocks are generated, you can test Steps 2-7 repeatedly without re-parsing
-- **Only re-run Step 1 if you changed the parser code or table export logic**
+**Processing Time Estimates:**
+- **UCG-23 (1091 pages)**:
+  - With VLM: ~30-50 minutes for Step 1
+  - Without VLM: ~5-10 minutes for Step 1
+- **iCCM (114 pages)**:
+  - With VLM: ~3-5 minutes for Step 1
+  - Without VLM: ~30 seconds for Step 1
 
-**Best Practice:**
-1. Test changes on iCCM first (fast iteration)
-2. Once working, verify on UCG-23 (full validation)
-3. Never re-run Step 1 on UCG-23 unless absolutely necessary
+**Best Practices:**
+1. **For testing**: Use iCCM with VLM disabled (`USE_DOCLING_VLM = False`)
+2. **For debugging Steps 2-7**: Once raw_blocks exist, test repeatedly without re-running Step 1
+3. **For production**: Use full UCG-23 with VLM enabled for highest accuracy
+4. **Only re-run Step 1** if you changed parser code or table export logic
+
+**Switching Documents:**
+To switch between documents, update `src/config.py`:
+```python
+ACTIVE_PDF = "Uganda_Clinical_Guidelines_2023.pdf"  # or "National integrated..."
+```
+Each document gets its own database file (auto-named from PDF filename).
 
 ## Database Inspection
 
+**Note**: Database filename is auto-generated from the active PDF name in config.py. For example:
+- `ACTIVE_PDF = "Uganda_Clinical_Guidelines_2023.pdf"` → `data/Uganda_Clinical_Guidelines_2023_rag.db`
+- `ACTIVE_PDF = "National integrated Community Case Management (iCCM) guidelines.pdf"` → `data/National integrated Community Case Management (iCCM) guidelines_rag.db`
+
+**Finding the active database**:
+```bash
+# Check config for currently active document
+python -c "from src.config import ACTIVE_PDF, DATABASE_PATH; print(f'Active: {ACTIVE_PDF}\nDatabase: {DATABASE_PATH}')"
+
+# Or directly inspect (replace {DB_NAME} with your database name)
+ls -lh data/*_rag.db
+```
+
+**Common inspection commands** (replace database path as needed):
 ```bash
 # View database structure
-sqlite3 data/ucg23_rag.db ".tables"
-sqlite3 data/ucg23_rag.db ".schema"
+sqlite3 "data/National integrated Community Case Management (iCCM) guidelines_rag.db" ".tables"
+sqlite3 "data/National integrated Community Case Management (iCCM) guidelines_rag.db" ".schema"
 
 # Check document registration
-sqlite3 data/ucg23_rag.db "SELECT * FROM documents;"
+sqlite3 "data/National integrated Community Case Management (iCCM) guidelines_rag.db" "SELECT * FROM documents;"
 
 # Check section hierarchy
-sqlite3 data/ucg23_rag.db "SELECT level, heading, heading_path FROM sections ORDER BY order_index LIMIT 20;"
+sqlite3 "data/National integrated Community Case Management (iCCM) guidelines_rag.db" "SELECT level, heading, heading_path FROM sections ORDER BY order_index LIMIT 20;"
 
 # Check chunk statistics
-sqlite3 data/ucg23_rag.db "SELECT COUNT(*) FROM parent_chunks;"
-sqlite3 data/ucg23_rag.db "SELECT COUNT(*) FROM child_chunks;"
+sqlite3 "data/National integrated Community Case Management (iCCM) guidelines_rag.db" "SELECT COUNT(*) FROM parent_chunks;"
+sqlite3 "data/National integrated Community Case Management (iCCM) guidelines_rag.db" "SELECT COUNT(*) FROM child_chunks;"
 ```
 
 ## Pipeline Architecture
@@ -263,15 +348,32 @@ On failure: rollback current transaction, log error, resume from last successful
 
 ## Configuration Constants
 
-From `src/config.py`:
+All configuration is centralized in `src/config.py`. Key settings:
+
 ```python
+# Document Selection
+ACTIVE_PDF = "National integrated Community Case Management (iCCM) guidelines.pdf"
+
+# Docling Parser Settings
+USE_DOCLING_VLM = True              # Enable VLM for enhanced accuracy
+DOCLING_TABLE_MODE = "accurate"     # "fast" or "accurate"
+DOCLING_VERSION = "2.0.0"           # Version tracking for reproducibility
+
+# Embedding Configuration
 EMBEDDING_MODEL_NAME = "text-embedding-3-small"
-EMBEDDING_DIMENSION = "1536"
-CHUNK_TOKEN_TARGET = "256"        # Child chunks
-PARENT_TOKEN_TARGET = "1500"      # Parent chunks
+EMBEDDING_DIMENSION = 1536
+
+# Chunking Token Targets
+CHILD_TOKEN_TARGET = 256            # Child chunks (retrieval units)
+CHILD_TOKEN_HARD_MAX = 512
+PARENT_TOKEN_TARGET = 1500          # Parent chunks (context for LLM)
+PARENT_TOKEN_HARD_MAX = 2000
+
+# Token Encoding
+TOKEN_ENCODING = "cl100k_base"      # All tokenization uses tiktoken
 ```
 
-**Note**: All tokenization uses tiktoken with cl100k_base encoding.
+**Note**: EMBEDDING_DIMENSION is schema-fixed. Changing models requires full database re-ingestion.
 
 ## Docling Block Schema
 
@@ -302,13 +404,15 @@ The full Docling JSON output is preserved in `documents.docling_json` for comple
 
 ## Critical Implementation Notes
 
-1. **Clinical Accuracy**: NO paraphrasing, NO summarization. Only syntactic transformations.
-2. **Table LOC Codes**: Pay special attention to Level of Care codes aligned with points without cell splits (page 641/644).
-3. **Embedding Model Lock-in**: The 1536 dimension is schema-fixed. Changing models requires full re-ingestion.
-4. **Parent-Child Pattern**: This is the core RAG architecture - always search children, return parents.
-5. **Docling Multi-Page Tables**: Docling automatically reconstructs tables spanning multiple pages. Check `page_range` field and `is_continuation` flag.
-6. **Incremental Updates**: Schema supports multiple documents; new versions can be added without rebuilding.
-7. **Full Traceability**: Complete Docling output preserved in `documents.docling_json` and `raw_blocks.metadata` for debugging and re-processing.
+1. **Document Agnostic**: Pipeline works with any clinical guideline PDF. Active document is specified in `src/config.py` via `ACTIVE_PDF`.
+2. **VLM Configuration**: `USE_DOCLING_VLM` controls parsing accuracy vs. speed trade-off. Enable for production, disable for testing.
+3. **Clinical Accuracy**: NO paraphrasing, NO summarization. Only syntactic transformations.
+4. **Table LOC Codes**: Pay special attention to Level of Care codes aligned with points without cell splits (UCG-23 pages 641/644).
+5. **Embedding Model Lock-in**: The 1536 dimension is schema-fixed. Changing models requires full re-ingestion.
+6. **Parent-Child Pattern**: This is the core RAG architecture - always search children, return parents.
+7. **Docling Multi-Page Tables**: Docling automatically reconstructs tables spanning multiple pages. Check `page_range` field and `is_continuation` flag.
+8. **Database Per Document**: Each PDF gets its own database file (auto-named from PDF filename).
+9. **Full Traceability**: Complete Docling output preserved in `documents.docling_json` and `raw_blocks.metadata` for debugging and re-processing.
 
 ## Logging and Auditability
 

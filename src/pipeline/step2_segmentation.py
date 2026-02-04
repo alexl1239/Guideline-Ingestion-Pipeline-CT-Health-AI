@@ -164,18 +164,35 @@ def _insert_chapter_with_descendants(
     blocks_updated = 0
     orphaned_blocks = 0
 
-    # Get chapter page range for filtering descendants
+    # Get chapter page range for block assignment
     chapter_page_start = chapter['page_start']
     chapter_page_end = chapter['page_end']
 
-    # Filter sections within this chapter
-    chapter_sections = [
-        s for s in all_sections
-        if s['page_start'] >= chapter_page_start and s['page_start'] <= chapter_page_end
-    ]
+    # Get chapter's order index range to find descendants
+    chapter_order_idx = chapter['order_index']
 
-    # Sort by order_index to maintain hierarchy order
-    chapter_sections.sort(key=lambda s: s['order_index'])
+    # Find the next chapter (level 1) to determine where descendants end
+    next_chapter_idx = None
+    for s in all_sections:
+        if s['level'] == 1 and s['order_index'] > chapter_order_idx:
+            next_chapter_idx = s['order_index']
+            break
+
+    # Filter sections by hierarchy (order_index), NOT by page range
+    # This handles cases where subsections appear outside the chapter's page bounds
+    if next_chapter_idx:
+        chapter_sections = [
+            s for s in all_sections
+            if chapter_order_idx <= s['order_index'] < next_chapter_idx
+        ]
+    else:
+        # Last chapter: include all remaining sections
+        chapter_sections = [
+            s for s in all_sections
+            if s['order_index'] >= chapter_order_idx
+        ]
+
+    # Already sorted by order_index from hierarchy extraction
 
     # Insert all sections in this chapter (skip if already inserted)
     for section in chapter_sections:
@@ -263,6 +280,22 @@ def run() -> None:
             raise SegmentationError("Docling JSON not found. Run Step 1 (parsing) first.")
 
         logger.success("✓ Loaded Docling JSON")
+
+        # Display VLM settings if available
+        pipeline_meta = docling_json.get('pipeline_metadata', {})
+        if pipeline_meta:
+            vlm_enabled = pipeline_meta.get('vlm_enabled', False)
+            table_mode = pipeline_meta.get('table_mode', 'unknown')
+            parsed_at = pipeline_meta.get('parsed_at', 'unknown')
+
+            if vlm_enabled:
+                logger.info(f"📊 VLM was ENABLED during parsing (table mode: {table_mode})")
+            else:
+                logger.info(f"📊 VLM was DISABLED during parsing (default mode)")
+            logger.info(f"   Parsed at: {parsed_at}")
+        else:
+            logger.warning("⚠ No pipeline metadata found (parsed before VLM tracking)")
+
     except Exception as e:
         logger.error(f"❌ Failed to load Docling JSON: {e}")
         raise SegmentationError(f"Failed to load Docling JSON: {e}") from e

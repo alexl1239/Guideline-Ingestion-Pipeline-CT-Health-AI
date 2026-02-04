@@ -178,22 +178,81 @@ def _is_end_matter(heading: str) -> bool:
     Returns:
         True if this is end matter
     """
+    import re
     heading_lower = heading.lower()
 
-    # Common end matter patterns
+    # Check for common end matter patterns
+    # Use word boundaries to avoid false matches (e.g., "Terms of Reference" should NOT match)
     end_matter_patterns = [
-        'tool kit',
-        'annex',
-        'appendix',
-        'reference',
-        'bibliography',
-        'glossary',
-        'index',
-        'acknowledgement',
-        'about the author',
+        r'\btool\s+kit\b',
+        r'^annex\b',  # Start of heading
+        r'^appendix\b',
+        r'^references?\b',  # "Reference" or "References" at start
+        r'^bibliography\b',
+        r'^glossary\b',
+        r'^index\b',
+        r'^acknowledgements?\b',
+        r'\babout\s+the\s+author\b',
     ]
 
-    return any(pattern in heading_lower for pattern in end_matter_patterns)
+    return any(re.search(pattern, heading_lower) for pattern in end_matter_patterns)
+
+
+def _is_front_matter(heading: str) -> bool:
+    """
+    Check if heading is front matter (ToC, foreword, acronyms, etc.).
+
+    Front matter should be level 1.
+
+    Args:
+        heading: Heading text
+
+    Returns:
+        True if this is front matter
+    """
+    heading_lower = heading.lower()
+
+    # Common front matter patterns
+    front_matter_patterns = [
+        'table of contents',
+        'contents',
+        'foreword',
+        'preface',
+        'acknowledgement',
+        'acronym',
+        'abbreviation',
+        'executive summary',
+    ]
+
+    return any(pattern in heading_lower for pattern in front_matter_patterns)
+
+
+def _is_likely_subsection(heading: str) -> bool:
+    """
+    Check if heading looks like a subsection (Step N, letter-based, etc.).
+
+    These should NOT be level 1 unless they're in front/end matter.
+
+    Args:
+        heading: Heading text
+
+    Returns:
+        True if this looks like a subsection pattern
+    """
+    import re
+
+    heading_lower = heading.lower()
+
+    # Patterns that indicate subsections
+    subsection_patterns = [
+        r'^step\s+\d+[:\.]',          # "Step 1:", "Step 2:"
+        r'^[a-z]\)',                   # "a)", "b)", "c)"
+        r'^[ivx]+\)',                  # "i)", "ii)", "iii)" (Roman numerals)
+        r'^\([a-z]\)',                 # "(a)", "(b)"
+        r'^[a-z]\.(?!\d)',             # "a.", "b." (not followed by digit)
+    ]
+
+    return any(re.match(pattern, heading_lower) for pattern in subsection_patterns)
 
 
 def _infer_level_from_numbering(heading: str) -> Optional[int]:
@@ -205,9 +264,10 @@ def _infer_level_from_numbering(heading: str) -> Optional[int]:
         "1.1 Context" -> 2
         "1.1.1 Background" -> 3
         "23.2.4 Disease Name" -> 3
+        "Step 1: ..." -> None (context-dependent, let caller handle)
+        "a) Development ..." -> None (context-dependent)
         "Tool Kit" -> 1 (end matter)
         "Annex 1: ..." -> 1 (end matter)
-        "4.1 References" -> 1 (end matter, even though numbered)
 
     Args:
         heading: Heading text
@@ -221,7 +281,7 @@ def _infer_level_from_numbering(heading: str) -> Optional[int]:
     if _is_end_matter(heading):
         return 1
 
-    # Match numbered patterns at start: "1", "1.1", "1.1.1", etc.
+    # Match numeric patterns at start: "1", "1.1", "1.1.1", etc.
     match = re.match(r'^(\d+(?:\.\d+)*)', heading)
     if match:
         numbering = match.group(1)
@@ -278,20 +338,34 @@ def build_section_tree(header_elements: List[Dict[str, Any]]) -> List[Dict[str, 
             logger.warning(f"Header missing page number: {heading_text[:50]}")
             page_num = 0  # Will be handled later
 
-        # Determine level (prioritize native, fallback to numbering inference)
-        if native_level is not None and native_level > 0:
-            # Trust Docling's native level
-            level = native_level
+        # Determine level (prioritize numbering inference over native level)
+        # VLM sometimes assigns all headings to level 1, so trust numbering first
+        inferred_level = _infer_level_from_numbering(heading_text)
+
+        if inferred_level:
+            # Use numbering-based level (most reliable for numbered sections)
+            level = inferred_level
             last_seen_level = level
-        else:
-            # Fallback: Infer level from heading numbering
-            inferred_level = _infer_level_from_numbering(heading_text)
-            if inferred_level:
-                level = inferred_level
-                last_seen_level = level
+        elif _is_front_matter(heading_text):
+            # Front matter is always level 1
+            level = 1
+            last_seen_level = 1
+        elif _is_likely_subsection(heading_text):
+            # Subsection patterns (Step N, a), b), etc.) should increment from context
+            # These are NOT level 1, even if VLM says so
+            level = min(last_seen_level + 1, 5)
+        elif native_level is not None and native_level > 0:
+            # Use native level, but be suspicious if it's 1 and we're deep in content
+            if native_level == 1 and last_seen_level >= 2:
+                # VLM says level 1, but we're in chapter content - probably wrong
+                # Increment from last seen level instead
+                level = min(last_seen_level + 1, 5)
             else:
-                # No native level and no numbering: assume one level deeper than previous
-                level = min(last_seen_level + 1, 5)  # Cap at level 5
+                level = native_level
+                last_seen_level = level
+        else:
+            # No numbering and no native level: assume one level deeper than previous
+            level = min(last_seen_level + 1, 5)  # Cap at level 5
 
         # Create section dict
         section = {

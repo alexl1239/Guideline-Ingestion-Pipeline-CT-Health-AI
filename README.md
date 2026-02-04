@@ -1,136 +1,237 @@
-## Summary of the UCG-23 RAG Pipeline
+# Clinical Guidelines RAG ETL Pipeline
 
-The pipeline converts **UCG-23** from PDF into a **single SQLite database** that is:
+A document-agnostic production ETL pipeline that converts clinical guideline PDFs into portable SQLite databases with vector search capabilities for offline RAG applications.
 
-* **Parser-flexible**
+## Overview
 
-  * Primarily uses **Docling**
+This pipeline transforms clinical guideline PDFs (such as the Uganda Clinical Guidelines 2023) into structured, searchable SQLite databases optimized for Retrieval-Augmented Generation (RAG) systems. The output is a single, portable `.db` file that can be used fully offline for clinical decision support.
 
-* **Clinically accurate**
+### Key Features
 
-  * Strict constraints on content transformation
-  * Extensive multi-stage QA validation
+- **Document-agnostic**: Works with any clinical guideline PDF
+- **Fully offline**: No API keys required for parsing (uses Docling)
+- **Single database output**: Complete knowledge base in one portable file
+- **Vector search**: Built-in semantic search using `sqlite-vec`
+- **Hierarchical structure**: Preserves document organization (chapters → sections → subsections)
+- **Production-ready**: Transactional pipeline with error handling and resumability
+- **Clinically accurate**: Strict constraints to prevent factual changes during processing
 
-* **Fully self-contained**
+## Quick Start
 
-  * Produces one `.db` file
-  * Includes embedded model metadata for reproducibility
+### Prerequisites
 
-* **Structured hierarchically**
+```bash
+# Python 3.11+
+python --version
 
-  * Chapters → diseases → subsections → parent chunks → child chunks
+# Create and activate virtual environment
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
 
-* **Enriched**
+# Install dependencies
+pip install -r requirements.txt
+```
 
-  * Tables are converted into logical text statements
-  * All clinical meaning is preserved exactly
+### Environment Setup
 
-* **Optimized for RAG**
+Create a `.env` file in the project root:
 
-  * Uses `sqlite-vec` embeddings (OpenAI `text-embedding-3-small`)
-  * Similarity search runs on **child chunks**
-  * Retrieval returns **parent chunks** to the LLM for cleaner context
+```bash
+# Required for embeddings (Step 6)
+OPENAI_API_KEY=your_openai_api_key_here
 
-* **Production-ready**
+# Optional: for Claude-based table conversion (Step 4)
+CLAUDE_API_KEY=your_claude_api_key_here
+```
 
-  * Transaction boundaries for every step
-  * Robust error handling and recovery procedures
-  * External logging for full traceability
+### Configuration
 
-* **Extensible**
+Edit `src/config.py` to select your document:
 
-  * Supports incremental updates
-  * Multi-document ingestion compatible
+```python
+# Set the active document to process
+ACTIVE_PDF = "Your_Clinical_Guideline.pdf"
 
----
+# Configure VLM (Vision Language Model) for enhanced accuracy
+USE_DOCLING_VLM = True          # Enable for complex layouts (3-5x slower)
+DOCLING_TABLE_MODE = "accurate" # "fast" or "accurate"
+```
 
-### Final Deliverable
+### Running the Pipeline
 
-A **single portable SQLite database file** that can be distributed and used fully offline as the **core knowledge base** of a clinical support chatbot built around the *Uganda Clinical Guidelines 2023*.
+Place your PDF in `data/source_pdfs/`, then:
 
----
+```bash
+# Run full pipeline
+python -m src.main --all
 
-## Working with Multiple Clinical Guidelines
+# Or run individual steps (0-8)
+python -m src.main --step 0  # Document registration
+python -m src.main --step 1  # Parsing with Docling
+python -m src.main --step 2  # Structural segmentation
+python -m src.main --step 3  # Cleanup and parent chunks
+python -m src.main --step 4  # Table linearization
+python -m src.main --step 5  # Child chunking
+python -m src.main --step 6  # Embeddings
+python -m src.main --step 7  # QA validation
+python -m src.main --step 8  # Database export
+```
 
-The pipeline supports processing multiple clinical guideline documents, with each document generating its own separate SQLite database file. This keeps each guideline's data isolated and portable.
+The output database will be created as `data/Your_Clinical_Guideline_rag.db`
+
+## Pipeline Architecture
+
+### 8-Step ETL Process
+
+1. **Document Registration** - Compute checksums and register source PDF
+2. **Parsing** - Extract content using Docling (offline PDF parser)
+3. **Structural Segmentation** - Build hierarchical section structure
+4. **Cleanup & Parent Chunks** - Normalize content and create topic-level chunks
+5. **Table Linearization** - Convert tables to natural language
+6. **Child Chunking** - Split into retrieval-optimized chunks (256 tokens)
+7. **Embeddings** - Generate vectors using OpenAI `text-embedding-3-small`
+8. **Export & Validation** - Optimize database and run QA checks
+
+### Database Schema
+
+```
+documents                    # Source metadata and checksums
+├── sections                 # Hierarchical structure
+│   └── raw_blocks          # Parsed content with native labels
+└── parent_chunks           # Complete clinical topics (1000-1500 tokens)
+    └── child_chunks        # Retrieval units (256 tokens)
+        └── vec_child_chunks # Vector embeddings (sqlite-vec)
+```
+
+### RAG Query Pattern
+
+The pipeline implements a parent-child retrieval pattern:
+- **Search** on child chunks (256 tokens) for precise matching
+- **Return** parent chunks (1000-1500 tokens) to LLM for complete context
+- This prevents duplication and ensures coherent clinical information
+
+## Working with Multiple Documents
+
+The pipeline supports processing multiple clinical guidelines, with each generating its own database.
 
 ### File Structure
 
 ```
 data/
-  source_pdfs/                                      # All source PDF files
-    Uganda_Clinical_Guidelines_2023.pdf
-    National integrated Community Case Management (iCCM) guidelines.pdf
+  source_pdfs/                    # All source PDFs
+    Guideline_A.pdf
+    Guideline_B.pdf
 
-  Uganda_Clinical_Guidelines_2023_rag.db           # Generated databases
-  National integrated Community Case Management (iCCM) guidelines_rag.db
-
-  intermediate/                                     # Processing artifacts
-  exports/                                          # Export artifacts
-  qa_reports/                                       # QA reports
+  Guideline_A_rag.db              # Generated databases
+  Guideline_B_rag.db
 ```
 
-### Setting the Active Document
+### Switching Documents
 
-Open `src/config.py` and change this line:
+1. Edit `src/config.py`:
+   ```python
+   ACTIVE_PDF = "Your_Guideline.pdf"
+   ```
+
+2. Run the pipeline:
+   ```bash
+   python -m src.main --all
+   ```
+
+Each document gets its own database file (auto-named from PDF filename).
+
+## VLM Configuration
+
+Docling supports optional Vision Language Model (VLM) processing:
 
 ```python
-# Line ~165 in src/config.py
-ACTIVE_PDF = "Uganda_Clinical_Guidelines_2023.pdf"  # Change to your PDF filename
+# In src/config.py
+USE_DOCLING_VLM = True          # Enable/disable VLM
+DOCLING_TABLE_MODE = "accurate"  # "fast" or "accurate"
 ```
 
-Database name is auto-generated from PDF filename:
-- `Uganda_Clinical_Guidelines_2023.pdf` → `Uganda_Clinical_Guidelines_2023_rag.db`
-- `National integrated Community Case Management (iCCM) guidelines.pdf` → `National integrated Community Case Management (iCCM) guidelines_rag.db`
+### VLM Trade-offs
 
-### Processing a New Guideline
+| Feature | VLM Enabled | VLM Disabled |
+|---------|-------------|--------------|
+| **Processing Speed** | 3-5x slower | Baseline |
+| **Table Accuracy** | Excellent | Good |
+| **Complex Layouts** | Excellent | Good |
+| **Use Case** | Production runs | Testing/iteration |
 
-**Step 1:** Add your PDF to `data/source_pdfs/`
+**Recommendation**: Use VLM disabled for testing, enabled for production.
 
-**Step 2:** Edit `src/config.py` line ~165:
+## Testing and Development
+
+For fast iteration during development, use a smaller test document:
+
 ```python
-ACTIVE_PDF = "YourGuideline.pdf"  # Change to your PDF filename
+# In src/config.py
+ACTIVE_PDF = "Small_Test_Guideline.pdf"  # e.g., 100-200 pages
+USE_DOCLING_VLM = False                   # Faster testing
 ```
 
-**Step 3:** Run the pipeline:
-```bash
-python src/main.py
-```
+**Processing Time Examples**:
+- Small document (100 pages) with VLM disabled: ~30 seconds
+- Large document (1000 pages) with VLM enabled: ~30-50 minutes
 
-A new database `YourGuideline_rag.db` will be created in `data/`
-
-### Helper Scripts
-
-#### List Available Databases
-
-View all databases:
+## Database Inspection
 
 ```bash
-python scripts/list_databases.py
+# Find your database
+ls -lh data/*_rag.db
+
+# Check structure
+sqlite3 "data/Your_Guideline_rag.db" ".tables"
+sqlite3 "data/Your_Guideline_rag.db" ".schema"
+
+# Verify content
+sqlite3 "data/Your_Guideline_rag.db" "SELECT * FROM documents;"
+sqlite3 "data/Your_Guideline_rag.db" "SELECT level, heading FROM sections LIMIT 10;"
+sqlite3 "data/Your_Guideline_rag.db" "SELECT COUNT(*) FROM parent_chunks;"
+sqlite3 "data/Your_Guideline_rag.db" "SELECT COUNT(*) FROM child_chunks;"
 ```
 
-Shows all `*_rag.db` files with their size, date, and corresponding PDF.
+## Project Structure
 
-### Querying a Specific Database
-
-All scripts automatically use the database corresponding to `ACTIVE_PDF` in `config.py`:
-
-```bash
-# Query current active database
-sqlite3 data/Uganda_Clinical_Guidelines_2023_rag.db "SELECT * FROM sections LIMIT 5;"
-
-# Or use direct path
-sqlite3 data/[YourDatabase]_rag.db "SELECT * FROM sections;"
+```
+├── data/
+│   ├── source_pdfs/          # Input PDFs
+│   ├── *_rag.db             # Output databases
+│   └── intermediate/         # Processing artifacts
+├── docs/                     # Documentation
+│   ├── CLAUDE.md            # Instructions for Claude Code
+│   ├── architecture.md       # System architecture
+│   ├── Extraction_Process_v3.md  # Detailed ETL design
+│   ├── HIERARCHY_EVOLUTION.md    # Hierarchy extraction evolution
+│   └── IMPROVEMENTS_SUMMARY.md   # Recent improvements
+├── src/
+│   ├── config.py            # Configuration
+│   ├── main.py              # Pipeline orchestrator
+│   ├── database/            # Schema and connections
+│   ├── parsers/             # Docling parser
+│   ├── pipeline/            # Steps 0-8
+│   └── utils/               # Utilities
+├── tests/                    # Test suite
+├── .env                     # API keys (not committed)
+├── requirements.txt         # Python dependencies
+└── README.md               # This file
 ```
 
-### Best Practices
+## Key Technologies
 
-1. **Check config:** Verify `ACTIVE_PDF` in `config.py` before running pipeline
-2. **Consistent naming:** Keep PDF filenames consistent (they become database names)
-3. **Separate databases:** Each guideline gets its own `.db` file for portability
+- **Docling**: Offline PDF parser (no API key required)
+- **SQLite + sqlite-vec**: Database with vector search
+- **OpenAI Embeddings**: `text-embedding-3-small` (1536 dimensions)
+- **tiktoken**: Token counting (cl100k_base encoding)
+- **loguru**: Structured logging
 
----
+## Documentation
 
-## Configuration
+Comprehensive documentation is available in the `docs/` folder:
 
-See `CLAUDE.md` for detailed pipeline configuration and implementation notes.
+- **[docs/CLAUDE.md](docs/CLAUDE.md)** - Instructions for Claude Code (AI assistant)
+- **[docs/architecture.md](docs/architecture.md)** - System architecture and module dependencies
+- **[docs/Extraction_Process_v3.md](docs/Extraction_Process_v3.md)** - Detailed ETL process design
+- **[docs/HIERARCHY_EVOLUTION.md](docs/HIERARCHY_EVOLUTION.md)** - Evolution of hierarchy extraction
+- **[docs/IMPROVEMENTS_SUMMARY.md](docs/IMPROVEMENTS_SUMMARY.md)** - Recent improvements and fixes

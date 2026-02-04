@@ -165,6 +165,19 @@ class DoclingParser(BaseParser):
             self.logger.info("Exporting to structured JSON...")
             doc_json = doc.export_to_dict()
 
+            # Add pipeline metadata (VLM settings, version, etc.)
+            import datetime
+            if 'pipeline_metadata' not in doc_json:
+                doc_json['pipeline_metadata'] = {}
+
+            doc_json['pipeline_metadata'].update({
+                'vlm_enabled': self._vlm_enabled,
+                'table_mode': DOCLING_TABLE_MODE if self._vlm_enabled else 'default',
+                'docling_version': DOCLING_VERSION,
+                'parsed_at': datetime.datetime.now().isoformat(),
+            })
+            self.logger.info(f"✓ Pipeline metadata added (VLM: {self._vlm_enabled})")
+
             # Add formatted markdown for tables
             if 'tables' in doc_json:
                 self.logger.info(f"Adding markdown export for {len(doc_json['tables'])} tables...")
