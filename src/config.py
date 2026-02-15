@@ -162,7 +162,7 @@ SOURCE_PDFS_DIR = PROJECT_ROOT / "data" / "source_pdfs"
 # ===================================
 
 # Active document (change this to switch documents)
-ACTIVE_PDF = "National integrated Community Case Management (iCCM) guidelines.pdf"
+ACTIVE_PDF = "Sample_Guidelines.pdf"
 
 # Resolve active PDF path
 SOURCE_PDF_PATH = SOURCE_PDFS_DIR / ACTIVE_PDF
@@ -227,6 +227,18 @@ DOCLING_VERSION = "2.0.0"  # Update this when upgrading Docling
 # Trade-off: Significantly slower processing (3-5x) but improved quality
 # Set to True to enable VLM, False to use default lightweight parsing
 USE_DOCLING_VLM = True
+
+# VLM Model Selection
+# Available options:
+# - "GRANITEDOCLING_TRANSFORMERS": IBM Granite Docling 258M (production-ready, CPU/CUDA)
+# - "GRANITEDOCLING_MLX": IBM Granite Docling 258M optimized for Apple Silicon (M1/M2/M3)
+# - "SMOLDOCLING_TRANSFORMERS": SmolDocling 256M experimental (CPU/CUDA)
+# - "SMOLDOCLING_MLX": SmolDocling 256M optimized for Apple Silicon (faster on Mac)
+# - "DEFAULT": Use Docling's default VLM (legacy behavior)
+#
+# Recommendation: Use MLX version if you have Apple Silicon (M1/M2/M3 Mac)
+# NOTE: MLX requires compatible dependency versions - if you get import errors, use TRANSFORMERS
+DOCLING_VLM_MODEL = "GRANITEDOCLING_TRANSFORMERS"  # Change to "DEFAULT" for legacy behavior
 
 # Table extraction mode when VLM is enabled
 # - "fast": Faster processing with good accuracy
@@ -383,6 +395,7 @@ def print_configuration():
     print(f"  Docling Version: {DOCLING_VERSION}")
     print(f"  VLM Enabled: {'Yes' if USE_DOCLING_VLM else 'No (default)'}")
     if USE_DOCLING_VLM:
+        print(f"  VLM Model: {DOCLING_VLM_MODEL}")
         print(f"  Table Mode: {DOCLING_TABLE_MODE}")
     print(f"\nModel Configuration:")
     print(f"  Embedding Model: {EMBEDDING_MODEL_NAME}")
@@ -450,6 +463,7 @@ __all__ = [
     # Docling config
     "DOCLING_VERSION",
     "USE_DOCLING_VLM",
+    "DOCLING_VLM_MODEL",
     "DOCLING_TABLE_MODE",
     # QA settings
     "QA_DISEASE_SAMPLE_PERCENTAGE",

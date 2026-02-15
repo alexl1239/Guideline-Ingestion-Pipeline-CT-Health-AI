@@ -53,8 +53,9 @@ Edit `src/config.py` to select your document:
 ACTIVE_PDF = "Your_Clinical_Guideline.pdf"
 
 # Configure VLM (Vision Language Model) for enhanced accuracy
-USE_DOCLING_VLM = True          # Enable for complex layouts (3-5x slower)
-DOCLING_TABLE_MODE = "accurate" # "fast" or "accurate"
+USE_DOCLING_VLM = True                      # Enable for complex layouts (3-5x slower)
+DOCLING_VLM_MODEL = "GRANITEDOCLING_TRANSFORMERS"  # Model selection (see VLM Configuration section)
+DOCLING_TABLE_MODE = "accurate"             # "fast" or "accurate"
 ```
 
 ### Running the Pipeline
@@ -142,13 +143,26 @@ Each document gets its own database file (auto-named from PDF filename).
 
 ## VLM Configuration
 
-Docling supports optional Vision Language Model (VLM) processing:
+Docling supports optional Vision Language Model (VLM) processing for enhanced document understanding:
 
 ```python
 # In src/config.py
-USE_DOCLING_VLM = True          # Enable/disable VLM
-DOCLING_TABLE_MODE = "accurate"  # "fast" or "accurate"
+USE_DOCLING_VLM = True                           # Enable/disable VLM
+DOCLING_VLM_MODEL = "GRANITEDOCLING_TRANSFORMERS"  # Model selection
+DOCLING_TABLE_MODE = "accurate"                  # "fast" or "accurate"
 ```
+
+### Available VLM Models
+
+| Model | Size | Hardware | Speed | Accuracy | Status |
+|-------|------|----------|-------|----------|--------|
+| **GRANITEDOCLING_TRANSFORMERS** | 258M | CPU/CUDA | Moderate | Excellent | ✅ **Recommended** |
+| GRANITEDOCLING_MLX | 258M | Apple Silicon | Fast | Excellent | ⚠️ Requires dependency updates |
+| SMOLDOCLING_TRANSFORMERS | 256M | CPU/CUDA | Fast | Very Good | Experimental |
+| SMOLDOCLING_MLX | 256M | Apple Silicon | Very Fast | Very Good | ⚠️ Requires dependency updates |
+| DEFAULT | - | Any | Slow | Good | Legacy mode |
+
+**Current Recommendation**: Use `GRANITEDOCLING_TRANSFORMERS` - production-ready with current dependencies.
 
 ### VLM Trade-offs
 
@@ -157,9 +171,25 @@ DOCLING_TABLE_MODE = "accurate"  # "fast" or "accurate"
 | **Processing Speed** | 3-5x slower | Baseline |
 | **Table Accuracy** | Excellent | Good |
 | **Complex Layouts** | Excellent | Good |
+| **Picture Descriptions** | Yes | No |
 | **Use Case** | Production runs | Testing/iteration |
 
-**Recommendation**: Use VLM disabled for testing, enabled for production.
+### MLX Support (Apple Silicon)
+
+MLX models provide GPU acceleration on Apple Silicon Macs (M1/M2/M3), but require newer package versions that are currently incompatible with Docling 2.64.0:
+
+```
+⚠️ Dependency Conflict:
+- MLX requires: transformers >= 5.0
+- Docling 2.64.0 requires: transformers < 5.0
+```
+
+**Resolution Options**:
+1. **Wait for Docling update**: Future Docling versions will support transformers 5.x
+2. **Use TRANSFORMERS model**: Works now with excellent accuracy (CPU-based)
+3. **Manual workaround**: Advanced users can resolve dependencies manually (not recommended)
+
+**Recommendation**: Use `GRANITEDOCLING_TRANSFORMERS` for production. MLX support will be available when Docling is updated.
 
 ## Testing and Development
 
@@ -226,12 +256,40 @@ sqlite3 "data/Your_Guideline_rag.db" "SELECT COUNT(*) FROM child_chunks;"
 - **tiktoken**: Token counting (cl100k_base encoding)
 - **loguru**: Structured logging
 
-## Documentation
+## Troubleshooting
 
-Comprehensive documentation is available in the `docs/` folder:
+### VLM Import Errors
 
-- **[docs/CLAUDE.md](docs/CLAUDE.md)** - Instructions for Claude Code (AI assistant)
-- **[docs/architecture.md](docs/architecture.md)** - System architecture and module dependencies
-- **[docs/Extraction_Process_v3.md](docs/Extraction_Process_v3.md)** - Detailed ETL process design
-- **[docs/HIERARCHY_EVOLUTION.md](docs/HIERARCHY_EVOLUTION.md)** - Evolution of hierarchy extraction
-- **[docs/IMPROVEMENTS_SUMMARY.md](docs/IMPROVEMENTS_SUMMARY.md)** - Recent improvements and fixes
+**Problem**: `ImportError: cannot import name 'AutoModelForVision2Seq'` or `mlx-vlm is not installed`
+
+**Cause**: Dependency version conflicts between VLM models and Docling
+
+**Solution**:
+1. Change model in `src/config.py`:
+   ```python
+   DOCLING_VLM_MODEL = "GRANITEDOCLING_TRANSFORMERS"
+   ```
+
+2. Reinstall correct dependencies:
+   ```bash
+   pip install --force-reinstall "transformers>=4.42.0,<5.0.0" "huggingface-hub>=0.23,<1.0"
+   ```
+
+### Slow Processing
+
+**Problem**: VLM processing is very slow
+
+**Solutions**:
+- **For testing**: Disable VLM (`USE_DOCLING_VLM = False`)
+- **For production**: Keep VLM enabled but be patient (3-5x slower is normal)
+- **Future**: MLX support will provide Apple Silicon acceleration
+
+### Memory Issues
+
+**Problem**: Process killed or out of memory
+
+**Solutions**:
+- Process smaller documents first
+- Reduce batch sizes in `src/config.py`
+- Close other applications
+- MLX models (when available) will use less memory

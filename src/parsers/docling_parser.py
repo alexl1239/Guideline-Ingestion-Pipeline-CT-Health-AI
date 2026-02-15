@@ -29,7 +29,7 @@ from docling.datamodel.base_models import InputFormat
 VLM_AVAILABLE = True  # VLM is available in Docling 2.0+
 
 from src.utils.logging_config import logger
-from src.config import DOCLING_VERSION, USE_DOCLING_VLM, DOCLING_TABLE_MODE
+from src.config import DOCLING_VERSION, USE_DOCLING_VLM, DOCLING_VLM_MODEL, DOCLING_TABLE_MODE
 from src.parsers.base import BaseParser, ParseResult
 
 
@@ -60,15 +60,60 @@ class DoclingParser(BaseParser):
         super().__init__()
         self.logger.info(f"Initializing Docling parser (version {DOCLING_VERSION})")
 
-        # Track whether VLM was actually enabled
+        # Track whether VLM was actually enabled and which model
         self._vlm_enabled = False
+        self._vlm_model = "None"
 
         try:
-            if USE_DOCLING_VLM:
-                self.logger.info(f"VLM requested with table mode: {DOCLING_TABLE_MODE}")
+            if USE_DOCLING_VLM and DOCLING_VLM_MODEL != "DEFAULT":
+                self.logger.info(f"VLM requested: {DOCLING_VLM_MODEL}")
                 self.logger.warning("VLM mode will significantly increase processing time (3-5x slower)")
 
-                # Create PdfFormatOption with VLM settings
+                # Import VLM pipeline components
+                from docling.pipeline.vlm_pipeline import VlmPipeline
+                from docling.datamodel.pipeline_options import VlmPipelineOptions
+                from docling.datamodel import vlm_model_specs
+
+                # Map model name to vlm_model_specs
+                model_map = {
+                    "GRANITEDOCLING_TRANSFORMERS": vlm_model_specs.GRANITEDOCLING_TRANSFORMERS,
+                    "GRANITEDOCLING_MLX": vlm_model_specs.GRANITEDOCLING_MLX,
+                    "SMOLDOCLING_TRANSFORMERS": vlm_model_specs.SMOLDOCLING_TRANSFORMERS,
+                    "SMOLDOCLING_MLX": vlm_model_specs.SMOLDOCLING_MLX,
+                }
+
+                if DOCLING_VLM_MODEL not in model_map:
+                    self.logger.warning(f"Unknown VLM model '{DOCLING_VLM_MODEL}', using GRANITEDOCLING_MLX")
+                    vlm_options = vlm_model_specs.GRANITEDOCLING_MLX
+                else:
+                    vlm_options = model_map[DOCLING_VLM_MODEL]
+
+                self.logger.info(f"✓ VLM model selected: {DOCLING_VLM_MODEL}")
+
+                # Create VLM pipeline options
+                pipeline_options = VlmPipelineOptions(vlm_options=vlm_options)
+
+                # Create PDF format options with VLM pipeline
+                pdf_options = PdfFormatOption(
+                    pipeline_cls=VlmPipeline,
+                    pipeline_options=pipeline_options,
+                )
+
+                # Create converter with VLM pipeline
+                self._converter = DocumentConverter(
+                    format_options={InputFormat.PDF: pdf_options}
+                )
+
+                self._vlm_enabled = True
+                self._vlm_model = DOCLING_VLM_MODEL
+                self.logger.success(f"✓ Docling DocumentConverter initialized with {DOCLING_VLM_MODEL}")
+
+            elif USE_DOCLING_VLM and DOCLING_VLM_MODEL == "DEFAULT":
+                # Legacy VLM configuration (old behavior)
+                self.logger.info(f"VLM requested with DEFAULT (legacy) configuration")
+                self.logger.warning("VLM mode will significantly increase processing time (3-5x slower)")
+
+                # Create PdfFormatOption with legacy VLM settings
                 pdf_options = PdfFormatOption()
 
                 # Get existing pipeline options and modify them
@@ -98,13 +143,15 @@ class DoclingParser(BaseParser):
                 )
 
                 self._vlm_enabled = True
-                self.logger.success("✓ Docling DocumentConverter initialized with VLM")
+                self._vlm_model = "DEFAULT (legacy)"
+                self.logger.success("✓ Docling DocumentConverter initialized with VLM (legacy mode)")
 
             else:
-                # Use default configuration
+                # Use default configuration (no VLM)
                 self.logger.info("Using default parsing mode (VLM disabled)")
                 self._converter = DocumentConverter()
                 self._vlm_enabled = False
+                self._vlm_model = "None"
                 self.logger.success("✓ Docling DocumentConverter initialized (default mode)")
 
         except Exception as e:
@@ -172,11 +219,12 @@ class DoclingParser(BaseParser):
 
             doc_json['pipeline_metadata'].update({
                 'vlm_enabled': self._vlm_enabled,
+                'vlm_model': self._vlm_model,
                 'table_mode': DOCLING_TABLE_MODE if self._vlm_enabled else 'default',
                 'docling_version': DOCLING_VERSION,
                 'parsed_at': datetime.datetime.now().isoformat(),
             })
-            self.logger.info(f"✓ Pipeline metadata added (VLM: {self._vlm_enabled})")
+            self.logger.info(f"✓ Pipeline metadata added (VLM: {self._vlm_model})")
 
             # Add formatted markdown for tables
             if 'tables' in doc_json:
@@ -205,7 +253,7 @@ class DoclingParser(BaseParser):
 
             # 7. Log VLM status
             if self._vlm_enabled:
-                self.logger.success("✓ VLM was ENABLED for this parse (picture descriptions active)")
+                self.logger.success(f"✓ VLM was ENABLED for this parse (model: {self._vlm_model})")
             else:
                 self.logger.info("ℹ VLM was DISABLED for this parse (default mode)")
 
