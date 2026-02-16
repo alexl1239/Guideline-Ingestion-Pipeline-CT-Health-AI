@@ -23,10 +23,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from docling.document_converter import DocumentConverter
+from docling.document_converter import DocumentConverter, PdfFormatOption
+from docling.datamodel.base_models import InputFormat
+
+VLM_AVAILABLE = True  # VLM is available in Docling 2.0+
 
 from src.utils.logging_config import logger
-from src.config import DOCLING_VERSION
+from src.config import DOCLING_VERSION, USE_DOCLING_VLM, DOCLING_VLM_MODEL, DOCLING_TABLE_MODE
 from src.parsers.base import BaseParser, ParseResult
 
 
@@ -46,21 +49,114 @@ class DoclingParser(BaseParser):
 
     def __init__(self) -> None:
         """
-        Initialize Docling parser with default configuration.
+        Initialize Docling parser with configuration.
 
-        Uses Docling's default settings:
+        Configuration options:
+        - VLM (Vision Language Model): Enhanced image understanding with picture descriptions
+        - Table mode: "fast" or "accurate" for table extraction
         - OCR enabled via Tesseract for scanned pages
-        - Default layout analysis model
         - Automatic multi-page table reconstruction
         """
         super().__init__()
         self.logger.info(f"Initializing Docling parser (version {DOCLING_VERSION})")
 
+        # Track whether VLM was actually enabled and which model
+        self._vlm_enabled = False
+        self._vlm_model = "None"
+
         try:
-            self._converter = DocumentConverter()
-            self.logger.success("Docling DocumentConverter initialized successfully")
+            if USE_DOCLING_VLM and DOCLING_VLM_MODEL != "DEFAULT":
+                self.logger.info(f"VLM requested: {DOCLING_VLM_MODEL}")
+                self.logger.warning("VLM mode will significantly increase processing time (3-5x slower)")
+
+                # Import VLM pipeline components
+                from docling.pipeline.vlm_pipeline import VlmPipeline
+                from docling.datamodel.pipeline_options import VlmPipelineOptions
+                from docling.datamodel import vlm_model_specs
+
+                # Map model name to vlm_model_specs
+                model_map = {
+                    "GRANITEDOCLING_TRANSFORMERS": vlm_model_specs.GRANITEDOCLING_TRANSFORMERS,
+                    "GRANITEDOCLING_MLX": vlm_model_specs.GRANITEDOCLING_MLX,
+                    "SMOLDOCLING_TRANSFORMERS": vlm_model_specs.SMOLDOCLING_TRANSFORMERS,
+                    "SMOLDOCLING_MLX": vlm_model_specs.SMOLDOCLING_MLX,
+                }
+
+                if DOCLING_VLM_MODEL not in model_map:
+                    self.logger.warning(f"Unknown VLM model '{DOCLING_VLM_MODEL}', using GRANITEDOCLING_MLX")
+                    vlm_options = vlm_model_specs.GRANITEDOCLING_MLX
+                else:
+                    vlm_options = model_map[DOCLING_VLM_MODEL]
+
+                self.logger.info(f"✓ VLM model selected: {DOCLING_VLM_MODEL}")
+
+                # Create VLM pipeline options
+                pipeline_options = VlmPipelineOptions(vlm_options=vlm_options)
+
+                # Create PDF format options with VLM pipeline
+                pdf_options = PdfFormatOption(
+                    pipeline_cls=VlmPipeline,
+                    pipeline_options=pipeline_options,
+                )
+
+                # Create converter with VLM pipeline
+                self._converter = DocumentConverter(
+                    format_options={InputFormat.PDF: pdf_options}
+                )
+
+                self._vlm_enabled = True
+                self._vlm_model = DOCLING_VLM_MODEL
+                self.logger.success(f"✓ Docling DocumentConverter initialized with {DOCLING_VLM_MODEL}")
+
+            elif USE_DOCLING_VLM and DOCLING_VLM_MODEL == "DEFAULT":
+                # Legacy VLM configuration (old behavior)
+                self.logger.info(f"VLM requested with DEFAULT (legacy) configuration")
+                self.logger.warning("VLM mode will significantly increase processing time (3-5x slower)")
+
+                # Create PdfFormatOption with legacy VLM settings
+                pdf_options = PdfFormatOption()
+
+                # Get existing pipeline options and modify them
+                pipeline_opts = pdf_options.pipeline_options
+
+                # Enable VLM picture description
+                pipeline_opts.do_picture_description = True
+                pipeline_opts.do_picture_classification = True
+                self.logger.info("✓ VLM picture description enabled")
+
+                # Configure table structure mode
+                from docling.datamodel.pipeline_options import TableFormerMode
+                if DOCLING_TABLE_MODE == "accurate":
+                    pipeline_opts.table_structure_options.mode = TableFormerMode.ACCURATE
+                    self.logger.info("✓ Table extraction: accurate mode")
+                else:
+                    pipeline_opts.table_structure_options.mode = TableFormerMode.FAST
+                    self.logger.info("✓ Table extraction: fast mode")
+
+                # Ensure table structure and OCR are enabled
+                pipeline_opts.do_table_structure = True
+                pipeline_opts.do_ocr = True
+
+                # Create converter with custom options
+                self._converter = DocumentConverter(
+                    format_options={InputFormat.PDF: pdf_options}
+                )
+
+                self._vlm_enabled = True
+                self._vlm_model = "DEFAULT (legacy)"
+                self.logger.success("✓ Docling DocumentConverter initialized with VLM (legacy mode)")
+
+            else:
+                # Use default configuration (no VLM)
+                self.logger.info("Using default parsing mode (VLM disabled)")
+                self._converter = DocumentConverter()
+                self._vlm_enabled = False
+                self._vlm_model = "None"
+                self.logger.success("✓ Docling DocumentConverter initialized (default mode)")
+
         except Exception as e:
             self.logger.error(f"Failed to initialize Docling: {e}")
+            self.logger.exception("Full traceback:")
             raise RuntimeError(f"Docling initialization failed: {e}") from e
 
         # Create output directory for saving markdown and JSON
@@ -112,9 +208,39 @@ class DoclingParser(BaseParser):
             markdown_text = doc.export_to_markdown()
             self.logger.success(f"✓ Markdown exported ({len(markdown_text):,} chars)")
 
-            # 4. Export structured JSON dict
+            # 4. Export structured JSON dict with table markdown
             self.logger.info("Exporting to structured JSON...")
             doc_json = doc.export_to_dict()
+
+            # Add pipeline metadata (VLM settings, version, etc.)
+            import datetime
+            if 'pipeline_metadata' not in doc_json:
+                doc_json['pipeline_metadata'] = {}
+
+            doc_json['pipeline_metadata'].update({
+                'vlm_enabled': self._vlm_enabled,
+                'vlm_model': self._vlm_model,
+                'table_mode': DOCLING_TABLE_MODE if self._vlm_enabled else 'default',
+                'docling_version': DOCLING_VERSION,
+                'parsed_at': datetime.datetime.now().isoformat(),
+            })
+            self.logger.info(f"✓ Pipeline metadata added (VLM: {self._vlm_model})")
+
+            # Add formatted markdown for tables
+            if 'tables' in doc_json:
+                self.logger.info(f"Adding markdown export for {len(doc_json['tables'])} tables...")
+                for i, table_item in enumerate(doc.tables):
+                    try:
+                        # Export table to markdown using Docling's built-in method (pass doc to avoid deprecation warning)
+                        table_markdown = table_item.export_to_markdown(doc=doc)
+                        # Add to the corresponding table in JSON
+                        if i < len(doc_json['tables']):
+                            doc_json['tables'][i]['markdown'] = table_markdown
+                    except Exception as e:
+                        self.logger.warning(f"Could not export table {i} to markdown: {e}")
+
+                self.logger.success("✓ Table markdown added")
+
             self.logger.success("✓ JSON structure exported")
 
             # 5. Count pages
@@ -125,7 +251,13 @@ class DoclingParser(BaseParser):
             # 6. Save outputs to files for inspection
             self._save_outputs(pdf_path.stem, markdown_text, doc_json)
 
-            # 7. Return ParseResult
+            # 7. Log VLM status
+            if self._vlm_enabled:
+                self.logger.success(f"✓ VLM was ENABLED for this parse (model: {self._vlm_model})")
+            else:
+                self.logger.info("ℹ VLM was DISABLED for this parse (default mode)")
+
+            # 8. Return ParseResult
             self.logger.success(f"✓ Parse complete: {num_pages} pages, {len(markdown_text):,} chars")
 
             return ParseResult(

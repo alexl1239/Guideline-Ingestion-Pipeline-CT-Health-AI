@@ -2,6 +2,8 @@
 STEP 7 — QA AND VALIDATION
 
 Validates structural consistency, accuracy, and statistical requirements.
+
+Document-agnostic: Works with any clinical guideline document.
 """
 
 from src.utils.logging_config import logger

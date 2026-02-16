@@ -2,6 +2,8 @@
 STEP 4 — TABLE LINEARIZATION
 
 Converts tables into natural language while preserving clinical accuracy.
+
+Document-agnostic: Works with any clinical guideline document tables.
 """
 
 from src.utils.logging_config import logger
