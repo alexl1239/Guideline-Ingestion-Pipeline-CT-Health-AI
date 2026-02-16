@@ -1,22 +1,25 @@
 """
 STEP 2 — STRUCTURAL SEGMENTATION
 
-Reconstructs logical hierarchy (Chapters → Diseases → Subsections) from parsed blocks
-and Table of Contents data.
+Reconstructs logical hierarchy (Chapters → Topics → Subsections) from Docling's
+native layout analysis.
+
+Document-agnostic: Works with any clinical guideline document structure.
 
 Process:
-1. Load section headers and Docling JSON from database
-2. Extract Table of Contents from Docling JSON
-3. Build complete hierarchy using heading patterns and ToC matching
-4. Insert sections into database (transaction per chapter)
-5. Update raw_blocks.section_id for all blocks in each chapter
-6. Export section tree to data/exports/section_tree.md for validation
-7. Log statistics (chapter/disease/subsection counts)
+1. Load Docling JSON from database
+2. Extract section hierarchy using Docling's native level fields (no ToC parsing)
+3. Insert sections into database (transaction per chapter)
+4. Update raw_blocks.section_id for all blocks in each chapter
+5. Export section tree to data/exports/section_tree.md for validation
+6. Log statistics (chapter/topic/subsection counts)
 
 Input: Populated raw_blocks table (from Step 1)
 Output: Populated sections table with hierarchical structure
 
-Transaction Boundary: Per chapter (as per CLAUDE.md)
+Transaction Boundary: Per chapter
+
+Note: This uses Docling's native hierarchy detection, eliminating fragile ToC parsing.
 """
 
 from typing import Dict, Any, List, Tuple
@@ -27,17 +30,16 @@ from src.utils.logging_config import logger
 from src.config import EXPORTS_DIR
 from src.database.operations import (
     get_registered_document,
-    get_section_header_blocks,
     get_document_docling_json,
     insert_section,
     update_blocks_section_id,
 )
 from src.database import get_connection
+from src.utils.segmentation.native_hierarchy import (
+    extract_native_hierarchy,
+    get_hierarchy_summary,
+)
 from src.utils.segmentation import (
-    extract_toc_from_docling,
-    validate_toc_entries,
-    get_toc_summary,
-    build_complete_hierarchy,
     assign_blocks_to_sections,
 )
 
@@ -64,7 +66,7 @@ def _export_section_tree(sections: List[Dict[str, Any]], output_path: Path) -> N
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(output_path, 'w', encoding='utf-8') as f:
-        f.write("# UCG-23 Section Hierarchy\n\n")
+        f.write("# Clinical Guideline Section Hierarchy\n\n")
         f.write(f"Total Sections: {len(sections)}\n\n")
 
         # Count by level
@@ -75,7 +77,7 @@ def _export_section_tree(sections: List[Dict[str, Any]], output_path: Path) -> N
 
         f.write("## Statistics\n\n")
         f.write(f"- Level 1 (Chapters): {level_counts.get(1, 0)}\n")
-        f.write(f"- Level 2 (Diseases/Topics): {level_counts.get(2, 0)}\n")
+        f.write(f"- Level 2 (Topics): {level_counts.get(2, 0)}\n")
         f.write(f"- Level 3 (Numbered subsections / Standard subsections under L2): {level_counts.get(3, 0)}\n")
         f.write(f"- Level 4 (Numbered sub-subsections / Standard subsections under L3): {level_counts.get(4, 0)}\n")
         f.write(f"- Level 5 (Standard subsections under L4): {level_counts.get(5, 0)}\n\n")
@@ -162,21 +164,44 @@ def _insert_chapter_with_descendants(
     blocks_updated = 0
     orphaned_blocks = 0
 
-    # Get chapter page range for filtering descendants
+    # Get chapter page range for block assignment
     chapter_page_start = chapter['page_start']
     chapter_page_end = chapter['page_end']
 
-    # Filter sections within this chapter
-    chapter_sections = [
-        s for s in all_sections
-        if s['page_start'] >= chapter_page_start and s['page_start'] <= chapter_page_end
-    ]
+    # Get chapter's order index range to find descendants
+    chapter_order_idx = chapter['order_index']
 
-    # Sort by order_index to maintain hierarchy order
-    chapter_sections.sort(key=lambda s: s['order_index'])
+    # Find the next chapter (level 1) to determine where descendants end
+    next_chapter_idx = None
+    for s in all_sections:
+        if s['level'] == 1 and s['order_index'] > chapter_order_idx:
+            next_chapter_idx = s['order_index']
+            break
 
-    # Insert all sections in this chapter
+    # Filter sections by hierarchy (order_index), NOT by page range
+    # This handles cases where subsections appear outside the chapter's page bounds
+    if next_chapter_idx:
+        chapter_sections = [
+            s for s in all_sections
+            if chapter_order_idx <= s['order_index'] < next_chapter_idx
+        ]
+    else:
+        # Last chapter: include all remaining sections
+        chapter_sections = [
+            s for s in all_sections
+            if s['order_index'] >= chapter_order_idx
+        ]
+
+    # Already sorted by order_index from hierarchy extraction
+
+    # Insert all sections in this chapter (skip if already inserted)
     for section in chapter_sections:
+        temp_id = id(section)  # Python object ID used as temp key
+
+        # Skip if already inserted (prevents duplicates on boundary pages)
+        if temp_id in section_id_mapping:
+            continue
+
         section_id = insert_section(
             cursor=cursor,
             document_id=document_id,
@@ -190,7 +215,6 @@ def _insert_chapter_with_descendants(
         )
 
         # Map temporary ID to database ID
-        temp_id = id(section)  # Python object ID used as temp key
         section_id_mapping[temp_id] = section_id
 
         sections_inserted += 1
@@ -222,19 +246,18 @@ def run() -> None:
     Execute Step 2: Structural Segmentation.
 
     Process:
-    1. Load section headers and Docling JSON
-    2. Extract ToC from Docling JSON
-    3. Build complete hierarchy
-    4. Insert sections into database (per-chapter transactions)
-    5. Update raw_blocks.section_id
-    6. Export section tree for validation
-    7. Log statistics
+    1. Load Docling JSON from database
+    2. Extract native hierarchy from Docling's layout analysis
+    3. Insert sections into database (per-chapter transactions)
+    4. Update raw_blocks.section_id
+    5. Export section tree for validation
+    6. Log statistics
 
     Raises:
         SegmentationError: If segmentation fails
     """
     logger.info("=" * 80)
-    logger.info("STEP 2: STRUCTURAL SEGMENTATION")
+    logger.info("STEP 2: STRUCTURAL SEGMENTATION (Native Hierarchy)")
     logger.info("=" * 80)
 
     # 1. Get registered document
@@ -247,22 +270,8 @@ def run() -> None:
 
     logger.success(f"✓ Found registered document: {document_id}")
 
-    # 2. Load section headers
-    logger.info("Loading section header blocks...")
-    try:
-        header_blocks = get_section_header_blocks(document_id)
-
-        if not header_blocks:
-            logger.error("❌ No section headers found. Please run Step 1 first.")
-            raise SegmentationError("No section headers found. Run Step 1 (parsing) first.")
-
-        logger.success(f"✓ Loaded {len(header_blocks)} section headers")
-    except Exception as e:
-        logger.error(f"❌ Failed to load section headers: {e}")
-        raise SegmentationError(f"Failed to load section headers: {e}") from e
-
-    # 3. Extract Table of Contents
-    logger.info("Extracting Table of Contents from Docling JSON...")
+    # 2. Load Docling JSON
+    logger.info("Loading Docling JSON from database...")
     try:
         docling_json = get_document_docling_json(document_id)
 
@@ -270,25 +279,31 @@ def run() -> None:
             logger.error("❌ Docling JSON not found. Please run Step 1 first.")
             raise SegmentationError("Docling JSON not found. Run Step 1 (parsing) first.")
 
-        toc_entries = extract_toc_from_docling(docling_json)
+        logger.success("✓ Loaded Docling JSON")
 
-        if toc_entries:
-            is_valid = validate_toc_entries(toc_entries)
-            if is_valid:
-                logger.success(f"✓ Extracted {len(toc_entries)} ToC entries")
-                logger.info(get_toc_summary(toc_entries))
+        # Display VLM settings if available
+        pipeline_meta = docling_json.get('pipeline_metadata', {})
+        if pipeline_meta:
+            vlm_enabled = pipeline_meta.get('vlm_enabled', False)
+            table_mode = pipeline_meta.get('table_mode', 'unknown')
+            parsed_at = pipeline_meta.get('parsed_at', 'unknown')
+
+            if vlm_enabled:
+                logger.info(f"📊 VLM was ENABLED during parsing (table mode: {table_mode})")
             else:
-                logger.warning("⚠ ToC entries failed validation, using as-is")
+                logger.info(f"📊 VLM was DISABLED during parsing (default mode)")
+            logger.info(f"   Parsed at: {parsed_at}")
         else:
-            logger.warning("⚠ No ToC entries found, will use fallback detection")
-    except Exception as e:
-        logger.error(f"❌ Failed to extract ToC: {e}")
-        raise SegmentationError(f"Failed to extract ToC: {e}") from e
+            logger.warning("⚠ No pipeline metadata found (parsed before VLM tracking)")
 
-    # 4. Build complete hierarchy
-    logger.info("Building section hierarchy...")
+    except Exception as e:
+        logger.error(f"❌ Failed to load Docling JSON: {e}")
+        raise SegmentationError(f"Failed to load Docling JSON: {e}") from e
+
+    # 3. Extract native hierarchy from Docling
+    logger.info("Extracting native hierarchy from Docling layout analysis...")
     try:
-        all_sections = build_complete_hierarchy(header_blocks, toc_entries)
+        all_sections = extract_native_hierarchy(docling_json)
 
         if not all_sections:
             logger.error("❌ No sections identified in hierarchy")
@@ -300,15 +315,19 @@ def run() -> None:
             level = section['level']
             level_counts[level] = level_counts.get(level, 0) + 1
 
-        logger.success(f"✓ Built hierarchy with {len(all_sections)} sections:")
+        logger.success(f"✓ Extracted hierarchy with {len(all_sections)} sections:")
         logger.info(f"  - Level 1 (Chapters): {level_counts.get(1, 0)}")
-        logger.info(f"  - Level 2 (Diseases): {level_counts.get(2, 0)}")
+        logger.info(f"  - Level 2 (Topics): {level_counts.get(2, 0)}")
         logger.info(f"  - Level 3+ (Subsections): {sum(c for l, c in level_counts.items() if l >= 3)}")
-    except Exception as e:
-        logger.error(f"❌ Failed to build hierarchy: {e}")
-        raise SegmentationError(f"Failed to build hierarchy: {e}") from e
 
-    # 5. Load all blocks for assignment
+        # Show hierarchy summary
+        logger.info("\n" + get_hierarchy_summary(all_sections))
+
+    except Exception as e:
+        logger.error(f"❌ Failed to extract native hierarchy: {e}")
+        raise SegmentationError(f"Failed to extract native hierarchy: {e}") from e
+
+    # 4. Load all blocks for assignment
     logger.info("Loading raw blocks for section assignment...")
     try:
         all_blocks = _get_all_raw_blocks(document_id)
@@ -317,7 +336,7 @@ def run() -> None:
         logger.error(f"❌ Failed to load raw blocks: {e}")
         raise SegmentationError(f"Failed to load raw blocks: {e}") from e
 
-    # 6. Insert sections and update blocks (per-chapter transactions)
+    # 5. Insert sections and update blocks (per-chapter transactions)
     logger.info("Inserting sections into database (per-chapter transactions)...")
 
     # Get all chapters
@@ -398,7 +417,7 @@ def run() -> None:
     if total_orphaned > 0:
         logger.warning(f"⚠ {total_orphaned} blocks could not be assigned to any section")
 
-    # 7. Export section tree
+    # 6. Export section tree
     logger.info("Exporting section tree for validation...")
     try:
         section_tree_path = EXPORTS_DIR / "section_tree.md"
@@ -408,17 +427,21 @@ def run() -> None:
         logger.warning(f"⚠ Failed to export section tree: {e}")
         # Non-critical error, continue
 
-    # 8. Log final statistics
+    # 7. Log final statistics
     logger.info("=" * 80)
-    logger.info("STEP 2 COMPLETE")
+    logger.info("STEP 2 COMPLETE (Native Hierarchy)")
     logger.info("=" * 80)
     logger.success(
-        f"✓ Successfully segmented {total_sections} sections "
-        f"({level_counts.get(1, 0)} chapters, {level_counts.get(2, 0)} diseases, "
-        f"{sum(c for l, c in level_counts.items() if l >= 3)} subsections)"
+        f"✓ Successfully segmented {total_sections} sections using Docling's native layout analysis"
+    )
+    logger.info(
+        f"  - {level_counts.get(1, 0)} chapters, {level_counts.get(2, 0)} topics, "
+        f"{sum(c for l, c in level_counts.items() if l >= 3)} subsections"
     )
     logger.success(f"✓ Assigned {total_blocks_updated} blocks to sections")
     logger.info(f"Section tree: {EXPORTS_DIR / 'section_tree.md'}")
+    logger.info("\nNote: This implementation uses Docling's native hierarchy detection,")
+    logger.info("eliminating fragile ToC parsing and page offset calculations.")
     logger.info("")
 
 

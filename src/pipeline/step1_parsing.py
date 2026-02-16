@@ -1,7 +1,9 @@
 """
 STEP 1 — PARSING
 
-Parses the UCG-23 PDF using Docling and inserts parsed blocks into raw_blocks table.
+Parses clinical guideline PDFs using Docling and inserts parsed blocks into raw_blocks table.
+
+Document-agnostic: Works with any clinical guideline PDF registered in Step 0.
 
 Process:
 1. Load registered document from database

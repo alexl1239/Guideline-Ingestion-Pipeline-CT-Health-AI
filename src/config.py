@@ -1,11 +1,12 @@
 """
-Configuration Module for UCG-23 RAG ETL Pipeline
+Configuration Module for Clinical Guideline Ingestion Pipeline
 
+Document-agnostic ETL pipeline configuration that supports multiple clinical guideline documents.
 Loads configuration from environment variables (.env file) and validates
 that all required settings are present. Includes model settings, API keys,
 file paths, and batch processing parameters.
 """
-
+2
 import os
 import sys
 from pathlib import Path
@@ -148,12 +149,53 @@ LARGE_TABLE_COL_THRESHOLD = 10
 # Project root directory
 PROJECT_ROOT = Path(__file__).parent.parent
 
-# Source PDF file (Docling has no page limit, so single file processing)
-SOURCE_PDF_PATH = PROJECT_ROOT / "data" / "ucg23_raw" / "Uganda_Clinical_Guidelines_2023.pdf"
+# Source PDFs directory (contains all guideline PDFs)
+SOURCE_PDFS_DIR = PROJECT_ROOT / "data" / "source_pdfs"
+
+# ===================================
+# ACTIVE DOCUMENT SELECTION
+# ===================================
+# To process a different document, change ACTIVE_PDF below
+#
+# This pipeline is document-agnostic and can process any clinical guideline PDF.
+# Place your PDF files in data/source_pdfs/ directory.
+# ===================================
+
+# Active document (change this to switch documents)
+ACTIVE_PDF = "Sample_Guidelines.pdf"
+
+# Resolve active PDF path
+SOURCE_PDF_PATH = SOURCE_PDFS_DIR / ACTIVE_PDF
 
 
-# Output database
-DATABASE_PATH = PROJECT_ROOT / "data" / "ucg23_rag.db"
+# Helper function: Generate database filename from PDF filename
+def get_database_name_from_pdf(pdf_filename: str) -> str:
+    """
+    Generate database filename from PDF filename.
+
+    Simple approach: Remove .pdf extension and add _rag.db
+
+    Examples:
+        "Uganda_Clinical_Guidelines_2023.pdf" -> "Uganda_Clinical_Guidelines_2023_rag.db"
+        "iCCM_guidelines.pdf" -> "iCCM_guidelines_rag.db"
+
+    Args:
+        pdf_filename: Name of the PDF file
+
+    Returns:
+        Database filename with _rag.db suffix
+    """
+    if pdf_filename.endswith('.pdf'):
+        base_name = pdf_filename[:-4]  # Remove .pdf
+    else:
+        base_name = pdf_filename
+
+    return f"{base_name}_rag.db"
+
+
+# Output database (auto-generated from active PDF name)
+DATABASE_NAME = get_database_name_from_pdf(ACTIVE_PDF)
+DATABASE_PATH = PROJECT_ROOT / "data" / DATABASE_NAME
 
 # Intermediate processing directories
 INTERMEDIATE_DIR = PROJECT_ROOT / "data" / "intermediate"
@@ -179,6 +221,29 @@ DOCLING_VERSION = "2.0.0"  # Update this when upgrading Docling
 # - Automatic multi-page table reconstruction
 # - High-quality layout analysis for accurate reading order
 # - Native identification of page headers/footers for filtering
+
+# VLM (Vision Language Model) Settings
+# Enables advanced vision-based document understanding for better accuracy
+# Trade-off: Significantly slower processing (3-5x) but improved quality
+# Set to True to enable VLM, False to use default lightweight parsing
+USE_DOCLING_VLM = True
+
+# VLM Model Selection
+# Available options:
+# - "GRANITEDOCLING_TRANSFORMERS": IBM Granite Docling 258M (production-ready, CPU/CUDA)
+# - "GRANITEDOCLING_MLX": IBM Granite Docling 258M optimized for Apple Silicon (M1/M2/M3)
+# - "SMOLDOCLING_TRANSFORMERS": SmolDocling 256M experimental (CPU/CUDA)
+# - "SMOLDOCLING_MLX": SmolDocling 256M optimized for Apple Silicon (faster on Mac)
+# - "DEFAULT": Use Docling's default VLM (legacy behavior)
+#
+# Recommendation: Use MLX version if you have Apple Silicon (M1/M2/M3 Mac)
+# NOTE: MLX requires compatible dependency versions - if you get import errors, use TRANSFORMERS
+DOCLING_VLM_MODEL = "GRANITEDOCLING_TRANSFORMERS"  # Change to "DEFAULT" for legacy behavior
+
+# Table extraction mode when VLM is enabled
+# - "fast": Faster processing with good accuracy
+# - "accurate": Slower but highest accuracy for complex tables
+DOCLING_TABLE_MODE = "accurate"  # "fast" or "accurate"
 
 
 # ==================================
@@ -249,9 +314,24 @@ def validate_configuration():
     if EMBEDDING_BATCH_SIZE <= 0:
         errors.append(f"EMBEDDING_BATCH_SIZE must be positive, got {EMBEDDING_BATCH_SIZE}")
 
-    # Validate source PDF exists
+    # Validate source PDFs directory exists
+    if not SOURCE_PDFS_DIR.exists():
+        errors.append(f"Source PDFs directory not found: {SOURCE_PDFS_DIR}")
+
+    # Validate active PDF exists
     if not SOURCE_PDF_PATH.exists():
-        errors.append(f"Source PDF not found: {SOURCE_PDF_PATH}")
+        # List available PDFs to help user
+        available_pdfs = []
+        if SOURCE_PDFS_DIR.exists():
+            available_pdfs = [f.name for f in SOURCE_PDFS_DIR.glob("*.pdf")]
+
+        error_msg = f"Active PDF not found: {SOURCE_PDF_PATH}\n"
+        error_msg += f"  Set via ACTIVE_PDF environment variable: '{ACTIVE_PDF}'\n"
+        if available_pdfs:
+            error_msg += f"  Available PDFs in {SOURCE_PDFS_DIR}:\n"
+            for pdf in available_pdfs:
+                error_msg += f"    - {pdf}\n"
+        errors.append(error_msg.rstrip())
 
     # Create required directories if they don't exist
     for directory in [INTERMEDIATE_DIR, EXPORTS_DIR, QA_REPORTS_DIR, LOGS_DIR]:
@@ -305,7 +385,7 @@ def get_parent_chunk_range() -> tuple[int, int]:
 def print_configuration():
     """Print current configuration (for debugging)."""
     print("\n" + "=" * 80)
-    print("UCG-23 RAG ETL Pipeline Configuration")
+    print("Clinical Guideline Ingestion Pipeline Configuration")
     print("=" * 80)
     print(f"\nAPI Keys:")
     print(f"  OPENAI_API_KEY: {'✓ Set' if OPENAI_API_KEY else '✗ Missing'}")
@@ -313,6 +393,10 @@ def print_configuration():
     print(f"\nParsing Configuration:")
     print(f"  Parser: Docling (offline, open-source)")
     print(f"  Docling Version: {DOCLING_VERSION}")
+    print(f"  VLM Enabled: {'Yes' if USE_DOCLING_VLM else 'No (default)'}")
+    if USE_DOCLING_VLM:
+        print(f"  VLM Model: {DOCLING_VLM_MODEL}")
+        print(f"  Table Mode: {DOCLING_TABLE_MODE}")
     print(f"\nModel Configuration:")
     print(f"  Embedding Model: {EMBEDDING_MODEL_NAME}")
     print(f"  Embedding Dimension: {EMBEDDING_DIMENSION}")
@@ -323,9 +407,12 @@ def print_configuration():
     print(f"  Parsing: {PARSING_BATCH_SIZE} blocks")
     print(f"  Cleanup/Tables: {CLEANUP_BATCH_SIZE}/{TABLE_BATCH_SIZE} sections")
     print(f"  Embeddings: {EMBEDDING_BATCH_SIZE} chunks")
+    print(f"\nActive Document:")
+    print(f"  PDF: {ACTIVE_PDF} ({'exists' if SOURCE_PDF_PATH.exists() else 'missing'})")
+    print(f"  Database: {DATABASE_NAME}")
+    print(f"  Path: {DATABASE_PATH}")
     print(f"\nFile Paths:")
-    print(f"  Source PDF: {SOURCE_PDF_PATH.name} ({'exists' if SOURCE_PDF_PATH.exists() else 'missing'})")
-    print(f"  Database: {DATABASE_PATH}")
+    print(f"  Source PDFs Directory: {SOURCE_PDFS_DIR}")
     print(f"\nDirectories:")
     print(f"  Intermediate: {INTERMEDIATE_DIR}")
     print(f"  Exports: {EXPORTS_DIR}")
@@ -362,14 +449,22 @@ __all__ = [
     "LARGE_TABLE_COL_THRESHOLD",
     # File paths
     "PROJECT_ROOT",
+    "SOURCE_PDFS_DIR",
+    "ACTIVE_PDF",
     "SOURCE_PDF_PATH",
+    "DATABASE_NAME",
     "DATABASE_PATH",
     "INTERMEDIATE_DIR",
     "EXPORTS_DIR",
     "QA_REPORTS_DIR",
     "LOGS_DIR",
+    # Helper functions
+    "get_database_name_from_pdf",
     # Docling config
     "DOCLING_VERSION",
+    "USE_DOCLING_VLM",
+    "DOCLING_VLM_MODEL",
+    "DOCLING_TABLE_MODE",
     # QA settings
     "QA_DISEASE_SAMPLE_PERCENTAGE",
     "QA_EMERGENCY_PROTOCOLS_REQUIRED",

@@ -1,8 +1,11 @@
 """
-UCG-23 RAG ETL Pipeline Main Entry Point
+Clinical Guideline Ingestion Pipeline - CT Health AI
 
 Provides CLI interface for running individual pipeline steps or the full pipeline.
-Initializes logging on startup and coordinates execution of all 9 steps.
+Initializes logging on startup and coordinates execution of all 8 steps.
+
+Document-agnostic pipeline that converts clinical guideline PDFs into searchable
+vector databases using Docling parser and OpenAI embeddings.
 """
 
 import argparse
@@ -24,7 +27,7 @@ from src.pipeline.step8_export import run as run_step8
 
 def main():
     """
-    Main entry point for UCG-23 ETL Pipeline.
+    Main entry point for Clinical Guideline Ingestion Pipeline.
 
     Initializes logging and coordinates pipeline execution based on CLI arguments.
     """
@@ -33,7 +36,7 @@ def main():
     logger = get_logger("main")
 
     logger.info("=" * 80)
-    logger.info("UCG-23 RAG ETL Pipeline")
+    logger.info("Clinical Guideline Ingestion Pipeline - CT Health AI")
     logger.info("=" * 80)
 
     # Initialize database schema if needed
@@ -54,7 +57,7 @@ def main():
             sys.exit(1)
         logger.success("✓ Database schema validated")
 
-    parser = argparse.ArgumentParser(description="UCG-23 ETL Pipeline")
+    parser = argparse.ArgumentParser(description="Clinical Guideline Ingestion Pipeline")
     parser.add_argument("--step", type=int, help="Run a specific step 0–8")
     parser.add_argument("--all", action="store_true", help="Run all steps in order")
     args = parser.parse_args()
