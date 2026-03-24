@@ -23,6 +23,56 @@ from src.utils.cleanup.database import (
 from src.utils.tokenization import count_tokens
 from src.utils.logging_config import logger
 
+# Pattern matching orphaned list markers that Docling sometimes extracts as
+# standalone text blocks, separated from their content.  Examples: "14.", "1)",
+# "(a)", "ii)", "b."  These should be merged with the following block.
+_ORPHANED_MARKER_RE = re.compile(
+    r'^(?:'
+    r'\d+[\.\)]'          # "14.", "1)"
+    r'|[a-z][\.\)]'       # "a.", "b)"
+    r'|\([a-z]\)'         # "(a)", "(b)"
+    r'|[ivx]+\)'          # "i)", "ii)", "iii)"
+    r')$',
+    re.IGNORECASE,
+)
+
+
+def _merge_orphaned_markers(parts: List[str]) -> List[str]:
+    """
+    Merge orphaned list markers with the following content block.
+
+    Docling sometimes extracts numbered/lettered list markers (e.g. "14.",
+    "1)", "(a)") as standalone text blocks, separated from their content.
+    This function detects those markers and prepends them to the next block.
+
+    Args:
+        parts: List of cleaned content strings (may include heading as first element)
+
+    Returns:
+        New list with orphaned markers merged into subsequent blocks
+    """
+    if len(parts) <= 1:
+        return parts
+
+    merged = []
+    pending_marker = None
+
+    for part in parts:
+        if pending_marker is not None:
+            # Prepend the marker to this block
+            merged.append(f"{pending_marker} {part}")
+            pending_marker = None
+        elif _ORPHANED_MARKER_RE.match(part.strip()):
+            pending_marker = part.strip()
+        else:
+            merged.append(part)
+
+    # If the last block was a marker with nothing after it, keep it as-is
+    if pending_marker is not None:
+        merged.append(pending_marker)
+
+    return merged
+
 
 def build_section_content(
     section: Dict[str, Any],
@@ -71,8 +121,11 @@ def build_section_content(
     subsection_ids = {s['id'] for s in subsections}
     main_blocks = [b for b in blocks if b['section_id'] == section_id]
 
-    # Clean main section blocks
-    main_content_parts = []
+    # Explicitly prepend the section heading from the sections table.
+    # section_header raw blocks are filtered as NOISE_BLOCK_TYPES, so heading
+    # construction is driven entirely by sections metadata — not raw block content.
+    # (These are always level-2 sections fetched by get_level2_sections().)
+    main_content_parts = ['## ' + section['heading']]
     blocks_cleaned = 0
     blocks_skipped = 0
 
@@ -84,17 +137,17 @@ def build_section_content(
         else:
             blocks_skipped += 1
 
-    if main_content_parts:
-        main_content = '\n\n'.join(main_content_parts)
-        main_tokens = count_tokens(main_content, tokenizer)
-        units.append({
-            'heading': section['heading'],
-            'heading_path': heading_path,
-            'content': main_content,
-            'tokens': main_tokens,
-            'section_id': section_id,
-        })
-        logger.debug(f"Main section content: {blocks_cleaned} blocks, {main_tokens} tokens")
+    main_content_parts = _merge_orphaned_markers(main_content_parts)
+    main_content = '\n\n'.join(main_content_parts)
+    main_tokens = count_tokens(main_content, tokenizer)
+    units.append({
+        'heading': section['heading'],
+        'heading_path': heading_path,
+        'content': main_content,
+        'tokens': main_tokens,
+        'section_id': section_id,
+    })
+    logger.debug(f"Main section content: {blocks_cleaned} blocks, {main_tokens} tokens")
 
     if blocks_skipped > 0:
         logger.debug(f"Skipped {blocks_skipped} noise/empty blocks in main section")
@@ -113,7 +166,9 @@ def build_section_content(
         level = subsection['level']
         markdown_heading = '#' * min(level, 6) + ' ' + sub_heading
 
-        # Clean subsection blocks
+        # Clean subsection blocks.
+        # section_header blocks are filtered by clean_block() via NOISE_BLOCK_TYPES;
+        # the heading is already prepended above from sections table metadata.
         sub_content_parts = [markdown_heading]
         sub_cleaned = 0
         sub_skipped = 0
@@ -126,6 +181,7 @@ def build_section_content(
             else:
                 sub_skipped += 1
 
+        sub_content_parts = _merge_orphaned_markers(sub_content_parts)
         sub_content = '\n\n'.join(sub_content_parts)
         sub_tokens = count_tokens(sub_content, tokenizer)
 
@@ -377,15 +433,18 @@ def create_parent_chunks(
 
     # Finalize remaining
     if current_units:
-        # Try to merge with previous chunk if both are small
-        if chunks and current_tokens < target_min and chunks[-1]['token_count'] < target_min:
+        # If the trailing remainder is below the minimum, always try to absorb
+        # it into the previous chunk — regardless of the previous chunk's size.
+        # A previous chunk that is already at or above target_min is still a
+        # valid merge target as long as the combined size respects hard_max.
+        if chunks and current_tokens < target_min:
             last_chunk = chunks[-1]
             merged_tokens = last_chunk['token_count'] + current_tokens
 
             if merged_tokens <= hard_max:
                 logger.debug(
-                    f"Merging small chunks: {last_chunk['token_count']} + {current_tokens} "
-                    f"= {merged_tokens} tokens"
+                    f"Absorbing small trailing remainder into previous chunk: "
+                    f"{last_chunk['token_count']} + {current_tokens} = {merged_tokens} tokens"
                 )
                 last_chunk['content'] = (
                     last_chunk['content'] + '\n\n' +
@@ -394,8 +453,10 @@ def create_parent_chunks(
                 last_chunk['token_count'] = merged_tokens
                 last_chunk['units'].extend(current_units)
             else:
+                # Cannot absorb without exceeding hard_max — emit as-is.
                 logger.debug(
-                    f"Cannot merge small chunks (would exceed hard_max: {merged_tokens})"
+                    f"Trailing remainder cannot be absorbed (merged {merged_tokens} > hard_max {hard_max}), "
+                    f"emitting as separate chunk"
                 )
                 chunks.append({
                     'section_id': section['id'],

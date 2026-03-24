@@ -75,7 +75,7 @@ def assign_blocks_to_sections(
         sections: List of sections with page_start, page_end, order_index
 
     Returns:
-        Dict mapping section temp ID (id(section)) to list of block IDs
+        Dict mapping section order_index to list of block IDs
     """
     mapping: Dict[int, List[int]] = {}
 
@@ -88,7 +88,7 @@ def assign_blocks_to_sections(
     # Sort sections by order_index (document order)
     sorted_sections = sorted(sections, key=lambda s: s.get('order_index', 0))
 
-    # Find header block IDs for each section
+    # Find header block IDs for each section, keyed by order_index (stable unique ID)
     section_header_ids: Dict[int, Optional[int]] = {}
     for section in sorted_sections:
         # First check if section already has header_block_id
@@ -96,12 +96,12 @@ def assign_blocks_to_sections(
         if not header_id:
             # Try to find matching header block
             header_id = _find_header_block_for_section(section, header_blocks)
-        section_header_ids[id(section)] = header_id
+        section_header_ids[section['order_index']] = header_id
 
     # Build list of (header_block_id, section) tuples for sections with headers
     section_boundaries = []
     for section in sorted_sections:
-        header_id = section_header_ids[id(section)]
+        header_id = section_header_ids[section['order_index']]
         if header_id is not None:
             section_boundaries.append((header_id, section))
 
@@ -165,10 +165,10 @@ def assign_blocks_to_sections(
                     assigned_section = valid_candidates[0]
 
         if assigned_section:
-            section_id = id(assigned_section)
-            if section_id not in mapping:
-                mapping[section_id] = []
-            mapping[section_id].append(block_id)
+            section_key = assigned_section['order_index']
+            if section_key not in mapping:
+                mapping[section_key] = []
+            mapping[section_key].append(block_id)
         else:
             orphaned_blocks += 1
             logger.debug(f"Orphaned block {block_id} on page {page}: {block.get('block_type')}")

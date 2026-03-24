@@ -262,7 +262,11 @@ def run() -> str:
 if __name__ == "__main__":
     # Initialize logging when run directly
     from src.utils.logging_config import setup_logger
+    from src.database.schema import create_schema
     setup_logger()
+
+    # Create tables if they don't exist yet
+    create_schema()
 
     try:
         doc_id = run()

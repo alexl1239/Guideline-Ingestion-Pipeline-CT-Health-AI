@@ -12,7 +12,13 @@ from src.utils.logging_config import logger
 
 
 # Block types to filter out (noise)
-NOISE_BLOCK_TYPES = {'page_header', 'page_footer'}
+# - page_header/page_footer: running headers/footers with no clinical content
+# - document_index: TOC navigation blocks; garbled by Docling (duplicate columns,
+#   dotted leaders, missing spaces) and add no clinical value to RAG chunks
+# - section_header: structural markers already captured in the sections table;
+#   headings are explicitly prepended from sections metadata in build_section_content(),
+#   so including the raw block would duplicate them in chunk content
+NOISE_BLOCK_TYPES = {'page_header', 'page_footer', 'document_index', 'section_header'}
 
 # Bullet character normalization mapping
 BULLET_CHARS = {
@@ -211,10 +217,12 @@ def clean_block(block: Dict[str, Any]) -> Optional[str]:
         return wrap_table_content(content)
 
     if block_type in ('figure', 'picture'):
-        # Try to extract caption from content or metadata
-        caption = content.strip() if len(content.strip()) < 200 else None
-        logger.debug(f"Creating figure placeholder (caption: {bool(caption)})")
-        return create_figure_placeholder(caption)
+        # Docling extracts captions as dedicated adjacent 'caption' blocks.
+        # Any text on the figure element itself is OCR'd from inside the image
+        # (step-number labels, box text, etc.) — not a true caption.
+        # Discard it and let the neighbouring caption block provide context.
+        logger.debug("Creating figure placeholder (caption supplied by adjacent caption block)")
+        return create_figure_placeholder()
 
     if block_type == 'caption':
         # Keep captions as-is but normalize

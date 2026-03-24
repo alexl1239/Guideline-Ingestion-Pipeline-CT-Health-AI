@@ -171,13 +171,6 @@ def extract_text_content(element: Dict[str, Any]) -> Optional[str]:
         >>> extract_text_content(element)
         'This is the content.'
     """
-    # Skip tables - they should use markdown_content for proper formatting
-    label = element.get('label', '')
-    block_type = element.get('type', '')
-    if 'table' in label.lower() or 'table' in block_type.lower():
-        # Tables will be handled by extract_markdown_content()
-        return None
-
     # Try direct text field first
     text = element.get('text', '').strip()
     if text:
@@ -214,11 +207,15 @@ def extract_markdown_content(element: Dict[str, Any]) -> Optional[str]:
     if markdown:
         return markdown
 
-    # For tables without markdown, try to get text field as fallback
+    # Tables without a markdown export fall back to text_content (set by
+    # extract_text_content). Log at WARNING so missing table markdown is visible
+    # during step1 runs rather than being silently swallowed.
     block_type = element.get('label') or element.get('type', '')
     if 'table' in block_type.lower():
-        # Log warning that table doesn't have markdown export
-        logger.debug(f"Table element missing markdown export, will use text content as fallback")
+        logger.warning(
+            "Table element has no markdown export — falling back to text_content. "
+            "Check that the Docling parser calls export_to_markdown() for all tables."
+        )
 
     return None
 
@@ -305,6 +302,30 @@ def extract_metadata(element: Dict[str, Any]) -> str:
     return json.dumps(metadata, ensure_ascii=False)
 
 
+def _is_picture_child(element: Dict[str, Any]) -> bool:
+    """
+    Check if an element is a child of a picture/figure element.
+
+    Docling 2.0 stores a 'parent' reference on each element. Text fragments
+    extracted from inside diagrams and flowcharts have a parent pointing to
+    a picture element (e.g. {"$ref": "#/pictures/5"}). These fragments are
+    typically single words or box labels that are meaningless outside the
+    visual context of the figure.
+
+    Args:
+        element: Docling element dict
+
+    Returns:
+        True if the element's parent is a picture element
+    """
+    parent = element.get('parent')
+    if isinstance(parent, dict):
+        ref = parent.get('$ref', '')
+        if ref.startswith('#/pictures/'):
+            return True
+    return False
+
+
 def extract_block_data(element: Dict[str, Any], document_id: str) -> Optional[Dict[str, Any]]:
     """
     Extract complete block data from Docling element for database insertion.
@@ -318,7 +339,7 @@ def extract_block_data(element: Dict[str, Any], document_id: str) -> Optional[Di
 
     Returns:
         Dict with all raw_blocks fields, or None if element should be skipped
-        (e.g., if it has no content)
+        (e.g., if it has no content or is a figure-internal text fragment)
 
     Example:
         >>> element = {
@@ -332,6 +353,12 @@ def extract_block_data(element: Dict[str, Any], document_id: str) -> Optional[Di
         >>> block['page_number']
         5
     """
+    # Skip text fragments extracted from inside figures/diagrams.
+    # These are box labels, step numbers, and arrow text that are meaningless
+    # outside the visual context of the figure.
+    if _is_picture_child(element):
+        return None
+
     # Extract basic content
     text_content = extract_text_content(element)
     markdown_content = extract_markdown_content(element)
@@ -350,10 +377,12 @@ def extract_block_data(element: Dict[str, Any], document_id: str) -> Optional[Di
     is_continuation = element.get('is_continuation', False)
     metadata = extract_metadata(element)
 
-    # Default page number to 0 if missing (required field)
+    # Default page number to 0 if missing (required field).
+    # Log at WARNING — a missing page number means this block will likely be
+    # mis-assigned during step2 segmentation and is a sign of malformed Docling output.
     if page_number is None:
         page_number = 0
-        logger.debug(f"Element missing page number, defaulting to 0: {block_type}")
+        logger.warning(f"Element missing page number, defaulting to 0: {block_type}")
 
     return {
         'document_id': document_id,
@@ -444,9 +473,14 @@ def extract_blocks_from_json(doc_json: Dict[str, Any], document_id: str) -> List
     # Extract block data from each element
     logger.info(f"Extracting block data from {len(elements)} elements...")
     skipped = 0
+    picture_children_skipped = 0
 
     for i, element in enumerate(elements):
         try:
+            if _is_picture_child(element):
+                picture_children_skipped += 1
+                skipped += 1
+                continue
             block_data = extract_block_data(element, document_id)
             if block_data:
                 blocks.append(block_data)
@@ -456,6 +490,12 @@ def extract_blocks_from_json(doc_json: Dict[str, Any], document_id: str) -> List
             logger.warning(f"Failed to extract block {i}: {e}")
             skipped += 1
             continue
+
+    if picture_children_skipped > 0:
+        logger.info(
+            f"Skipped {picture_children_skipped} text fragments from inside "
+            f"figures/diagrams (picture children)"
+        )
 
     logger.success(
         f"✓ Extracted {len(blocks)} blocks from {len(elements)} elements "
@@ -477,4 +517,5 @@ __all__ = [
     "extract_metadata",
     "extract_block_data",
     "extract_blocks_from_json",
+    "_is_picture_child",
 ]

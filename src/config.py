@@ -162,7 +162,7 @@ SOURCE_PDFS_DIR = PROJECT_ROOT / "data" / "source_pdfs"
 # ===================================
 
 # Active document (change this to switch documents)
-ACTIVE_PDF = "Sample_Guidelines.pdf"
+ACTIVE_PDF = "National integrated Community Case Management (iCCM) guidelines.pdf"
 
 # Resolve active PDF path
 SOURCE_PDF_PATH = SOURCE_PDFS_DIR / ACTIVE_PDF
@@ -238,7 +238,7 @@ USE_DOCLING_VLM = True
 #
 # Recommendation: Use MLX version if you have Apple Silicon (M1/M2/M3 Mac)
 # NOTE: MLX requires compatible dependency versions - if you get import errors, use TRANSFORMERS
-DOCLING_VLM_MODEL = "GRANITEDOCLING_TRANSFORMERS"  # Change to "DEFAULT" for legacy behavior
+DOCLING_VLM_MODEL = "DEFAULT"  # Change to "DEFAULT" for legacy behavior
 
 # Table extraction mode when VLM is enabled
 # - "fast": Faster processing with good accuracy

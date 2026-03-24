@@ -194,9 +194,11 @@ def _insert_chapter_with_descendants(
 
     # Already sorted by order_index from hierarchy extraction
 
-    # Insert all sections in this chapter (skip if already inserted)
+    # Insert all sections in this chapter, deduped by order_index.
+    # order_index is assigned sequentially during hierarchy extraction and is
+    # unique across all sections in a document, making it a stable key.
     for section in chapter_sections:
-        temp_id = id(section)  # Python object ID used as temp key
+        temp_id = section['order_index']
 
         # Skip if already inserted (prevents duplicates on boundary pages)
         if temp_id in section_id_mapping:
@@ -228,14 +230,16 @@ def _insert_chapter_with_descendants(
     # Build mapping of temp_section_id -> block_ids
     block_assignments = assign_blocks_to_sections(blocks_in_chapter, chapter_sections)
 
-    # Update raw_blocks.section_id using database IDs
-    for temp_section_id, block_ids in block_assignments.items():
-        if temp_section_id in section_id_mapping:
-            db_section_id = section_id_mapping[temp_section_id]
+    # Update raw_blocks.section_id using database IDs.
+    # block_assignments keys are order_index values; section_id_mapping maps
+    # those same order_index values to the inserted database section IDs.
+    for order_idx, block_ids in block_assignments.items():
+        if order_idx in section_id_mapping:
+            db_section_id = section_id_mapping[order_idx]
             updated = update_blocks_section_id(cursor, db_section_id, block_ids)
             blocks_updated += updated
         else:
-            logger.warning(f"Section ID mapping not found for temp_id: {temp_section_id}")
+            logger.warning(f"No DB section found for order_index {order_idx} — {len(block_ids)} blocks orphaned")
             orphaned_blocks += len(block_ids)
 
     return sections_inserted, blocks_updated, orphaned_blocks
