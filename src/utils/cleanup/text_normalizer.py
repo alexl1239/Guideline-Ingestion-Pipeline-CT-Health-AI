@@ -213,6 +213,12 @@ def clean_block(block: Dict[str, Any]) -> Optional[str]:
 
     # Handle different block types
     if block_type == 'table':
+        # If Step 4 has already linearized this table (stored in text_content),
+        # use the linearized text directly instead of wrapping raw markdown.
+        linearized = block.get('text_content', '').strip() if block.get('text_content') else ''
+        if linearized:
+            logger.debug(f"Using linearized table content (length: {len(linearized)})")
+            return normalize_markdown(linearized)
         logger.debug(f"Wrapping table block (length: {len(content)})")
         return wrap_table_content(content)
 

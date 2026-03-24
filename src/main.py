@@ -91,9 +91,11 @@ def main():
 
     if args.all:
         logger.info("Running full pipeline (steps 0-8)")
+        # Step 4 (tables) runs BEFORE Step 3 (cleanup/chunking) so that
+        # linearized table text is naturally picked up during chunk construction.
         for i, step_fn in enumerate([
             run_step0, run_step1, run_step2,
-            run_step3, run_step4, run_step5,
+            run_step4, run_step3, run_step5,
             run_step6, run_step7, run_step8
         ]):
             logger.info("")
