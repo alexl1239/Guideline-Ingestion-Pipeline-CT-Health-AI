@@ -37,11 +37,8 @@ pip install -r requirements.txt
 Create a `.env` file in the project root:
 
 ```bash
-# Required for embeddings (Step 6)
+# Required for embeddings (Step 6) and table linearization (Step 3)
 OPENAI_API_KEY=your_openai_api_key_here
-
-# Optional: for Claude-based table conversion (Step 4)
-CLAUDE_API_KEY=your_claude_api_key_here
 ```
 
 ### Configuration

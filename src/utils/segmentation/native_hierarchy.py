@@ -149,8 +149,8 @@ def extract_native_hierarchy(doc_json: Dict[str, Any]) -> List[Dict[str, Any]]:
     else:
         logger.warning("Could not determine document page count from Docling JSON")
 
-    # 2. Build section tree from headers
-    sections = build_section_tree(header_elements)
+    # 2. Build section tree from headers (pass page count for end-matter position check)
+    sections = build_section_tree(header_elements, doc_page_count=doc_page_count)
 
     # 3. Assign page ranges (pass actual doc page count)
     sections = assign_page_ranges(sections, doc_page_count)
@@ -257,17 +257,21 @@ def _is_likely_subsection(heading: str) -> bool:
 
 def _infer_level_from_numbering(heading: str) -> Optional[int]:
     """
-    Infer hierarchy level from heading numbering pattern.
+    Infer hierarchy level from numeric heading prefix.
 
     Examples:
         "1 INTRODUCTION" -> 1
         "1.1 Context" -> 2
         "1.1.1 Background" -> 3
         "23.2.4 Disease Name" -> 3
-        "Step 1: ..." -> None (context-dependent, let caller handle)
-        "a) Development ..." -> None (context-dependent)
-        "Tool Kit" -> 1 (end matter)
-        "Annex 1: ..." -> 1 (end matter)
+        "Step 1: ..." -> None (context-dependent, caller handles)
+        "Tool Kit" -> None (end matter, caller handles with position-awareness)
+        "Annex 1: ..." -> None (end matter, caller handles with position-awareness)
+
+    End-matter detection lives in the caller (`build_section_tree`) because it
+    needs the heading's document position to disambiguate cases like
+    "References and Research Materials" appearing on page 3 of 16 (mid-document
+    section, not actual end matter).
 
     Args:
         heading: Heading text
@@ -276,10 +280,6 @@ def _infer_level_from_numbering(heading: str) -> Optional[int]:
         Inferred level (1-5) or None if no numbering found
     """
     import re
-
-    # Check for end matter first - always level 1
-    if _is_end_matter(heading):
-        return 1
 
     # Match numeric patterns at start: "1", "1.1", "1.1.1", etc.
     match = re.match(r'^(\d+(?:\.\d+)*)', heading)
@@ -295,20 +295,40 @@ def _infer_level_from_numbering(heading: str) -> Optional[int]:
     return None
 
 
-def build_section_tree(header_elements: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+# Pages near the front (cover, ToC) and back (annexes, references) are detected
+# by relative position in the document. These thresholds define what "near the
+# end" means for end-matter heuristics — a "References" heading on page 3 of 16
+# is mid-document, but on page 55 of 64 it really is end matter.
+END_MATTER_POSITION_THRESHOLD = 0.66
+
+
+def build_section_tree(
+    header_elements: List[Dict[str, Any]],
+    doc_page_count: int = 0,
+) -> List[Dict[str, Any]]:
     """
     Construct section tree from Docling section_header elements.
 
     Strategy (document-agnostic):
-    1. Primarily trust Docling's native 'level' field from layout analysis
-    2. Fall back to numbering inference if native level unavailable
-    3. Track last seen level for consistency
-
-    This approach works across different document types without needing
-    document-specific patterns or subsection lists.
+    1. Numeric prefixes win — "1.1.1 Background" → level 3, regardless of
+       Docling's native level (the VLM frequently flattens everything to
+       level 1, so numbering is the most reliable signal when present)
+    2. Front matter (Foreword, Acronyms, ToC, etc.) → level 1
+    3. End matter (Annex, Appendix, References, Tool Kit) → level 1, but only
+       if the heading appears in the latter portion of the document.
+       "References" on page 3 of 16 is a mid-document section, not end matter
+    4. Subsection patterns (Step N, a), b)) → child of current depth
+    5. Otherwise: if Docling produced varying native levels, trust them; if
+       Docling collapsed everything to level 1 (the broken case for visually
+       homogeneous PDFs), auto-promote each non-first un-numbered header to
+       a child of the most recent level-1 chapter. This produces a usable
+       chapter→topic structure for flat policy documents that have no
+       numbering at all.
 
     Args:
-        header_elements: List of section_header elements from Docling
+        header_elements: section_header elements from Docling
+        doc_page_count: Total document pages (used for end-matter position check;
+            pass 0 to disable position-awareness)
 
     Returns:
         List of section dicts with level, heading, page_start, order_index
@@ -316,7 +336,7 @@ def build_section_tree(header_elements: List[Dict[str, Any]]) -> List[Dict[str, 
     logger.info("Building section tree from headers...")
 
     sections = []
-    last_seen_level = 1  # Track last seen level for fallback
+    last_seen_level = 1  # Tracks the depth we should auto-promote children from
 
     for i, element in enumerate(header_elements):
         # Extract basic info
@@ -338,34 +358,53 @@ def build_section_tree(header_elements: List[Dict[str, Any]]) -> List[Dict[str, 
             logger.warning(f"Header missing page number: {heading_text[:50]}")
             page_num = 0  # Will be handled later
 
-        # Determine level (prioritize numbering inference over native level)
-        # VLM sometimes assigns all headings to level 1, so trust numbering first
+        # Position fraction (0.0 = first page, 1.0 = last page).
+        # When the page count is unknown, fall back to 0.5 (mid-doc) so
+        # end-matter heuristics neither over-fire nor under-fire.
+        if doc_page_count > 0 and page_num > 0:
+            position_frac = page_num / doc_page_count
+        else:
+            position_frac = 0.5
+
         inferred_level = _infer_level_from_numbering(heading_text)
 
         if inferred_level:
-            # Use numbering-based level (most reliable for numbered sections)
+            # Numeric prefix → most reliable signal
             level = inferred_level
             last_seen_level = level
         elif _is_front_matter(heading_text):
-            # Front matter is always level 1
+            # Cover, ToC, Foreword, Acronyms — always level 1
+            level = 1
+            last_seen_level = 1
+        elif (
+            _is_end_matter(heading_text)
+            and position_frac >= END_MATTER_POSITION_THRESHOLD
+        ):
+            # Annex/Appendix/References/Tool Kit, but only if actually near the end.
+            # This prevents "References" on page 3 of a short policy doc from being
+            # misclassified as end matter and resetting the chapter chain.
             level = 1
             last_seen_level = 1
         elif _is_likely_subsection(heading_text):
-            # Subsection patterns (Step N, a), b), etc.) should increment from context
-            # These are NOT level 1, even if VLM says so
+            # Step 1, a), b), i): leaf depth one below the current numbered context
             level = min(last_seen_level + 1, 5)
-        elif native_level is not None and native_level > 0:
-            # Use native level, but be suspicious if it's 1 and we're deep in content
-            if native_level == 1 and last_seen_level >= 2:
-                # VLM says level 1, but we're in chapter content - probably wrong
-                # Increment from last seen level instead
-                level = min(last_seen_level + 1, 5)
-            else:
-                level = native_level
-                last_seen_level = level
+            # Don't update last_seen_level — siblings stay at the same depth
+        elif not sections:
+            # First section in the document — use it as the document chapter.
+            # If Docling assigned a meaningful level, honour it; otherwise default to 1.
+            level = native_level if (native_level and native_level > 0) else 1
+            last_seen_level = level
+        elif native_level is not None and native_level > 1:
+            # Docling provided a non-trivial level — trust it.
+            level = native_level
+            last_seen_level = level
         else:
-            # No numbering and no native level: assume one level deeper than previous
-            level = min(last_seen_level + 1, 5)  # Cap at level 5
+            # No signal at all (Docling collapsed to level 1). Treat as a child of
+            # the most recent chapter so flat documents still produce level-2
+            # topics for downstream chunking. last_seen_level stays put so a run
+            # of un-numbered headers becomes a flat list of siblings, not an
+            # accidentally-nested chain.
+            level = min(last_seen_level + 1, 5)
 
         # Create section dict
         section = {
@@ -377,7 +416,7 @@ def build_section_tree(header_elements: List[Dict[str, Any]]) -> List[Dict[str, 
             'heading_path': '',  # Will be built later
             'metadata': {
                 'native_docling_level': native_level,
-                'inferred_from_numbering': _infer_level_from_numbering(heading_text) is not None,
+                'inferred_from_numbering': inferred_level is not None,
                 'element_id': element.get('id'),
             }
         }

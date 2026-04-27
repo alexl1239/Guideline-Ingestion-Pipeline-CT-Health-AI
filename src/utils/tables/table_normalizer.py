@@ -1,5 +1,5 @@
 """
-Table Markdown Preprocessing for Step 4
+Table Markdown Preprocessing for Step 3
 
 Cleans Docling's raw table markdown before LLM linearization or storage.
 Fixes known Docling output quality issues without altering clinical data.

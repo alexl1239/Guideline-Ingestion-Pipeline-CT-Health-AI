@@ -17,8 +17,8 @@ from src.config import DATABASE_PATH
 from src.pipeline.step0_registration import run as run_step0
 from src.pipeline.step1_parsing import run as run_step1
 from src.pipeline.step2_segmentation import run as run_step2
-from src.pipeline.step3_cleanup import run as run_step3
-from src.pipeline.step4_tables import run as run_step4
+from src.pipeline.step3_tables import run as run_step3
+from src.pipeline.step4_cleanup import run as run_step4
 from src.pipeline.step5_chunking import run as run_step5
 from src.pipeline.step6_embeddings import run as run_step6
 from src.pipeline.step7_qa import run as run_step7
@@ -91,11 +91,9 @@ def main():
 
     if args.all:
         logger.info("Running full pipeline (steps 0-8)")
-        # Step 4 (tables) runs BEFORE Step 3 (cleanup/chunking) so that
-        # linearized table text is naturally picked up during chunk construction.
         for i, step_fn in enumerate([
             run_step0, run_step1, run_step2,
-            run_step4, run_step3, run_step5,
+            run_step3, run_step4, run_step5,
             run_step6, run_step7, run_step8
         ]):
             logger.info("")

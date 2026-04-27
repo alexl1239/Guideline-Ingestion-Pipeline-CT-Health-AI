@@ -6,7 +6,7 @@ Loads configuration from environment variables (.env file) and validates
 that all required settings are present. Includes model settings, API keys,
 file paths, and batch processing parameters.
 """
-2
+
 import os
 import sys
 from pathlib import Path
@@ -69,7 +69,7 @@ try:
     OPENAI_API_KEY = get_env_variable("OPENAI_API_KEY", required=True)
 
     # Claude API key (optional, for LLM-based processing)
-    CLAUDE_API_KEY = get_env_variable("CLAUDE_API_KEY", required=False)
+    # CLAUDE_API_KEY = get_env_variable("CLAUDE_API_KEY", required=False)
 
 except ConfigurationError as e:
     # Note: Using print() here because this runs during module import,
@@ -91,6 +91,9 @@ EMBEDDING_DIMENSION = 1536  # Fixed dimension for text-embedding-3-small
 
 # IMPORTANT: Changing embedding model requires regenerating entire vector table
 # per requirements section 3.3
+
+# Table linearization model (Step 3) — uses OpenAI chat API
+TABLE_LLM_MODEL = "gpt-4o-mini"
 
 
 # ==================================
@@ -120,7 +123,7 @@ TOKEN_ENCODING = "cl100k_base"
 # Step 1 (Parsing): Batch per N blocks
 PARSING_BATCH_SIZE = 100
 
-# Step 3-4 (Cleanup/Tables): Batch per N sections
+# Step 3 (Tables) and Step 4 (Cleanup): Batch per N sections
 CLEANUP_BATCH_SIZE = 10
 TABLE_BATCH_SIZE = 10
 
@@ -162,7 +165,7 @@ SOURCE_PDFS_DIR = PROJECT_ROOT / "data" / "source_pdfs"
 # ===================================
 
 # Active document (change this to switch documents)
-ACTIVE_PDF = "National integrated Community Case Management (iCCM) guidelines.pdf"
+ACTIVE_PDF = "C-08003-ABCBS copy.pdf"
 
 # Resolve active PDF path
 SOURCE_PDF_PATH = SOURCE_PDFS_DIR / ACTIVE_PDF
@@ -226,7 +229,7 @@ DOCLING_VERSION = "2.0.0"  # Update this when upgrading Docling
 # Enables advanced vision-based document understanding for better accuracy
 # Trade-off: Significantly slower processing (3-5x) but improved quality
 # Set to True to enable VLM, False to use default lightweight parsing
-USE_DOCLING_VLM = True
+USE_DOCLING_VLM = False
 
 # VLM Model Selection
 # Available options:
@@ -389,7 +392,6 @@ def print_configuration():
     print("=" * 80)
     print(f"\nAPI Keys:")
     print(f"  OPENAI_API_KEY: {'✓ Set' if OPENAI_API_KEY else '✗ Missing'}")
-    print(f"  CLAUDE_API_KEY: {'✓ Set' if CLAUDE_API_KEY else '- Not set (optional)'}")
     print(f"\nParsing Configuration:")
     print(f"  Parser: Docling (offline, open-source)")
     print(f"  Docling Version: {DOCLING_VERSION}")
@@ -400,6 +402,7 @@ def print_configuration():
     print(f"\nModel Configuration:")
     print(f"  Embedding Model: {EMBEDDING_MODEL_NAME}")
     print(f"  Embedding Dimension: {EMBEDDING_DIMENSION}")
+    print(f"  Table LLM Model: {TABLE_LLM_MODEL}")
     print(f"\nToken Limits:")
     print(f"  Child chunks: target={CHILD_TOKEN_TARGET}, max={CHILD_TOKEN_HARD_MAX}")
     print(f"  Parent chunks: target={PARENT_TOKEN_TARGET}, max={PARENT_TOKEN_HARD_MAX}")
@@ -425,11 +428,11 @@ def print_configuration():
 __all__ = [
     # API Keys
     "OPENAI_API_KEY",
-    "CLAUDE_API_KEY",
     # Model settings
     "EMBEDDING_MODEL_NAME",
     "EMBEDDING_DIMENSION",
     "TOKEN_ENCODING",
+    "TABLE_LLM_MODEL",
     # Token limits
     "CHILD_TOKEN_TARGET",
     "CHILD_TOKEN_TOLERANCE",

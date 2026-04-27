@@ -1,5 +1,5 @@
 """
-STEP 3 — CLEANUP AND PARENT CHUNK CONSTRUCTION
+STEP 4 — CLEANUP AND PARENT CHUNK CONSTRUCTION
 
 Removes noise, normalizes markdown content, and constructs parent chunks
 from raw blocks for RAG retrieval.
@@ -16,6 +16,7 @@ Process:
 7. Write parent chunks to database with token counts
 
 Input: Populated raw_blocks table with section_id assignments (from Step 2)
+       and linearized table text_content (from Step 3)
 Output: Populated parent_chunks table
 
 Transaction Boundary: Per batch of 10 sections
@@ -65,7 +66,7 @@ def run(
     overwrite: bool = False,
 ) -> Dict[str, Any]:
     """
-    Execute Step 3: Cleanup and Parent Chunk Construction.
+    Execute Step 4: Cleanup and Parent Chunk Construction.
 
     Args:
         db_path: Path to database (defaults to config)
@@ -89,7 +90,7 @@ def run(
     start_time = time.time()
 
     logger.info("=" * 80)
-    logger.info("STEP 3: CLEANUP AND PARENT CHUNK CONSTRUCTION")
+    logger.info("STEP 4: CLEANUP AND PARENT CHUNK CONSTRUCTION")
     logger.info("=" * 80)
 
     # Get or validate document ID
@@ -216,7 +217,7 @@ def run(
 
     # Log summary
     logger.info("=" * 80)
-    logger.info("STEP 3 COMPLETE")
+    logger.info("STEP 4 COMPLETE")
     logger.info("=" * 80)
     logger.success(f"Level-2 sections processed: {stats['sections_processed']}")
     logger.success(f"Parent chunks created: {stats['parent_chunks_created']}")
@@ -240,23 +241,23 @@ def run(
 
 
 def main():
-    """CLI entry point for Step 3."""
+    """CLI entry point for Step 4."""
     parser = argparse.ArgumentParser(
-        description="Step 3: Cleanup and Parent Chunk Construction",
+        description="Step 4: Cleanup and Parent Chunk Construction",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
     # Run with auto-detected document ID
-    python -m src.pipeline.step3_cleanup
+    python -m src.pipeline.step4_cleanup
 
     # Run with specific document ID
-    python -m src.pipeline.step3_cleanup --doc-id 4e2ce587-fc2c-4f79-8f2f-8ac25d5252b0
+    python -m src.pipeline.step4_cleanup --doc-id 4e2ce587-fc2c-4f79-8f2f-8ac25d5252b0
 
     # Overwrite existing chunks and export
-    python -m src.pipeline.step3_cleanup --overwrite --export data/exports/
+    python -m src.pipeline.step4_cleanup --overwrite --export data/exports/
 
     # Specify custom database path
-    python -m src.pipeline.step3_cleanup --db data/ucg23_rag.db
+    python -m src.pipeline.step4_cleanup --db data/ucg23_rag.db
         """
     )
 
@@ -293,14 +294,14 @@ Examples:
             export_path=args.export,
             overwrite=args.overwrite,
         )
-        logger.info("Step 3 completed successfully")
+        logger.info("Step 4 completed successfully")
         sys.exit(0)
 
     except CleanupError as e:
-        logger.error(f"Step 3 failed: {e}")
+        logger.error(f"Step 4 failed: {e}")
         sys.exit(1)
     except Exception as e:
-        logger.exception(f"Unexpected error in Step 3: {e}")
+        logger.exception(f"Unexpected error in Step 4: {e}")
         sys.exit(1)
 
 

@@ -2,7 +2,7 @@
 """
 Parent Chunks Inspection Script
 
-Interactive CLI tool for inspecting and analyzing parent chunks from the Step 3
+Interactive CLI tool for inspecting and analyzing parent chunks from the Step 4
 database output. Provides multiple commands with optional markdown export.
 
 OUTPUT BEHAVIOR:
@@ -35,7 +35,7 @@ COMMANDS:
                 With --export: saves to data/exports/parent_chunks_search.md
                 Example: python scripts/inspect_parent_chunks.py search "malaria" --export
 
-NOTE: Step 3 automatically exports parent_chunks_all.md to data/exports/ when run.
+NOTE: Step 4 automatically exports parent_chunks_all.md to data/exports/ when run.
       This script provides additional ad-hoc inspection and analysis capabilities.
 
 Usage Examples:
@@ -424,7 +424,7 @@ Examples:
     python scripts/inspect_parent_chunks.py search "malaria"
     python scripts/inspect_parent_chunks.py search "malaria" --export
 
-NOTE: Step 3 auto-exports parent_chunks_all.md to data/exports/ for full content review.
+NOTE: Step 4 auto-exports parent_chunks_all.md to data/exports/ for full content review.
         """
     )
 

@@ -2,7 +2,7 @@
 Tokenization Utilities
 
 Shared token counting functions using tiktoken.
-Used across multiple pipeline steps (Step 3, Step 5, etc.).
+Used across multiple pipeline steps (Step 4, Step 5, etc.).
 """
 
 from typing import Optional

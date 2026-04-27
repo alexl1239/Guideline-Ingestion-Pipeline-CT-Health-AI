@@ -1,8 +1,8 @@
 """
-Cleanup Utilities (Step 3)
+Cleanup Utilities (Step 4)
 
 Modular utilities for text normalization, chunking, and database operations
-used in Step 3: Cleanup and Parent Chunk Construction.
+used in Step 4: Cleanup and Parent Chunk Construction.
 """
 
 # Text normalization
@@ -12,7 +12,6 @@ from src.utils.cleanup.text_normalizer import (
     normalize_bullets,
     normalize_whitespace,
     normalize_markdown,
-    wrap_table_content,
     create_figure_placeholder,
     clean_block,
 )
@@ -45,7 +44,6 @@ __all__ = [
     'normalize_bullets',
     'normalize_whitespace',
     'normalize_markdown',
-    'wrap_table_content',
     'create_figure_placeholder',
     'clean_block',
     # Chunking

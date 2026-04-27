@@ -1,5 +1,5 @@
 """
-Database Operations for Cleanup (Step 3)
+Database Operations for Cleanup (Step 4)
 
 Functions for querying sections, raw blocks, and managing parent chunks.
 """

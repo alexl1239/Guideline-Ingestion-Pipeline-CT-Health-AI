@@ -1,8 +1,12 @@
 """
-Text Normalization for Cleanup (Step 3)
+Text Normalization for Cleanup (Step 4)
 
 Functions for cleaning and normalizing markdown content from raw blocks.
 Preserves clinical accuracy while standardizing formatting.
+
+Tables are expected to have been linearized by Step 3 first — clean_block()
+reads raw_blocks.text_content for table blocks. If text_content is empty,
+the raw markdown is passed through and a warning is logged.
 """
 
 import re
@@ -127,25 +131,6 @@ def normalize_markdown(text: str) -> str:
     return text
 
 
-def wrap_table_content(text: str) -> str:
-    """
-    Wrap table markdown with clear fences for later processing.
-
-    Tables are marked for special handling in downstream steps (Step 4).
-
-    Args:
-        text: Table markdown content
-
-    Returns:
-        Wrapped table content
-
-    Example:
-        >>> wrap_table_content("| Col1 | Col2 |")
-        "\\n\\n[TABLE]\\n| Col1 | Col2 |\\n[/TABLE]\\n\\n"
-    """
-    return f"\n\n[TABLE]\n{text.strip()}\n[/TABLE]\n\n"
-
-
 def create_figure_placeholder(caption: Optional[str] = None) -> str:
     """
     Create a placeholder for figure/image content.
@@ -213,14 +198,19 @@ def clean_block(block: Dict[str, Any]) -> Optional[str]:
 
     # Handle different block types
     if block_type == 'table':
-        # If Step 4 has already linearized this table (stored in text_content),
-        # use the linearized text directly instead of wrapping raw markdown.
+        # Step 3 (table linearization) writes prose into text_content. We use
+        # that when present. If it's empty, Step 3 was skipped or failed for
+        # this block — fall back to the raw markdown so chunks still build,
+        # but log so the operator sees it.
         linearized = block.get('text_content', '').strip() if block.get('text_content') else ''
         if linearized:
             logger.debug(f"Using linearized table content (length: {len(linearized)})")
             return normalize_markdown(linearized)
-        logger.debug(f"Wrapping table block (length: {len(content)})")
-        return wrap_table_content(content)
+        logger.warning(
+            f"Table block has no linearized text_content — "
+            f"falling back to raw markdown. Did Step 3 run?"
+        )
+        return normalize_markdown(content)
 
     if block_type in ('figure', 'picture'):
         # Docling extracts captions as dedicated adjacent 'caption' blocks.

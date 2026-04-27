@@ -11,7 +11,9 @@ into a consistent schema for storage.
 """
 
 import json
-from typing import Dict, List, Any, Optional
+import re
+from collections import defaultdict
+from typing import Dict, List, Any, Optional, Tuple
 
 from src.utils.logging_config import logger
 
@@ -255,7 +257,7 @@ def extract_block_type(element: Dict[str, Any]) -> str:
     - figure: Images and diagrams
     - list, list_item: List structures
     - caption: Figure/table captions
-    - page_header, page_footer: Running headers (filtered in Step 3)
+    - page_header, page_footer: Running headers (filtered in Step 4)
 
     Args:
         element: Docling element dict
@@ -399,6 +401,212 @@ def extract_block_data(element: Dict[str, Any], document_id: str) -> Optional[Di
     }
 
 
+def _normalize_for_dedup(text: str) -> str:
+    """Lowercase and collapse whitespace for repeated-content matching."""
+    if not text:
+        return ''
+    return ' '.join(text.lower().split())
+
+
+# Replace runs of digits with a placeholder so per-page numbers (page numbers,
+# dates, revision counters) collapse into a single template that can be matched
+# across pages. Keeps the surrounding text intact so two unrelated paragraphs
+# that both happen to mention numbers don't false-match — they only collide if
+# everything else around the digits is identical.
+_DIGIT_RUN_RE = re.compile(r'\d+')
+
+
+def _digit_template(text: str) -> str:
+    return _DIGIT_RUN_RE.sub('N', text)
+
+
+def mark_repeated_content_as_page_headers(
+    blocks: List[Dict[str, Any]],
+    min_repetitions: int = 3,
+    min_text_length: int = 5,
+) -> List[Dict[str, Any]]:
+    """
+    Re-tag text blocks that are page-level boilerplate as `page_header`.
+
+    Some PDFs have running headers, page numbers, and legal disclaimers that
+    Docling fails to identify as page-level boilerplate (they come through as
+    plain `text` blocks). Step 4's noise filter only excludes `page_header` /
+    `page_footer` blocks, so without this re-tag the boilerplate ends up
+    duplicated in every parent chunk.
+
+    Two passes — both document-agnostic:
+
+    1. **Exact match**: identical normalized text appears on ≥ N distinct
+       pages. Catches static disclaimers, running titles, copyright lines.
+    2. **Digit-template match**: text matches a template after replacing
+       digit runs with `N` (so `Page 1 of 16` and `Page 2 of 16` both
+       collapse to `Page N of N`). Catches per-page footers and bare dates.
+       The non-numeric text must still match exactly, so a list of
+       paragraphs containing different numbers in different sentences won't
+       collide.
+
+    Operates only on `text` blocks — section headers, list items, and tables
+    are left alone.
+
+    Args:
+        blocks: List of block dicts (mutated in place)
+        min_repetitions: Minimum number of distinct pages for a text to count as
+            repeated boilerplate
+        min_text_length: Skip very short text to avoid false positives on
+            single-character noise
+
+    Returns:
+        The same blocks list with repeated content re-tagged.
+    """
+    # bucket key = (kind, normalized_form). Two passes share one structure so
+    # a block tagged by either rule is only retagged once.
+    page_buckets: Dict[Tuple[str, str], set] = defaultdict(set)
+    block_buckets: Dict[Tuple[str, str], list] = defaultdict(list)
+
+    for idx, block in enumerate(blocks):
+        if block['block_type'] != 'text':
+            continue
+        text = block.get('text_content') or ''
+        if len(text) < min_text_length:
+            continue
+        page = block.get('page_number') or 0
+
+        norm = _normalize_for_dedup(text)
+        page_buckets[('exact', norm)].add(page)
+        block_buckets[('exact', norm)].append(idx)
+
+        template = _normalize_for_dedup(_digit_template(text))
+        if template != norm:
+            page_buckets[('template', template)].add(page)
+            block_buckets[('template', template)].append(idx)
+
+    retagged: set = set()
+    for key, pages in page_buckets.items():
+        if len(pages) < min_repetitions:
+            continue
+        for block_idx in block_buckets[key]:
+            if block_idx in retagged:
+                continue
+            blocks[block_idx]['block_type'] = 'page_header'
+            retagged.add(block_idx)
+
+    if retagged:
+        logger.info(
+            f"Re-tagged {len(retagged)} text blocks as page_header "
+            f"(content / numeric template repeated on ≥{min_repetitions} distinct pages)"
+        )
+    return blocks
+
+
+def _count_table_columns(markdown: str) -> int:
+    """Count columns in a markdown table by inspecting the first pipe-delimited row."""
+    if not markdown:
+        return 0
+    for line in markdown.split('\n'):
+        line = line.strip()
+        if line.startswith('|') and line.endswith('|') and line.count('|') >= 2:
+            # `|a|b|c|` has 4 pipes and 3 columns
+            return line.count('|') - 1
+    return 0
+
+
+def merge_consecutive_table_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Merge table blocks on consecutive pages with matching column structure.
+
+    Docling sometimes fails to reconstruct tables that span multiple pages
+    (especially when the continuation page does not repeat the header row).
+    This pass walks the table blocks in document order and concatenates any
+    run of tables on consecutive pages whose column counts match — producing
+    one logical block with combined `markdown_content` and a `page_range`
+    spanning the run. Continuation blocks are dropped from the returned list.
+
+    Same-page tables are kept separate (different tables); only adjacent-page
+    runs with consistent structure are stitched together.
+
+    Args:
+        blocks: List of block dicts (originals are mutated; some are dropped)
+
+    Returns:
+        New list with continuation table blocks removed and the survivor
+        carrying the combined content.
+    """
+    if not blocks:
+        return blocks
+
+    table_indices = [i for i, b in enumerate(blocks) if b.get('block_type') == 'table']
+    if len(table_indices) < 2:
+        return blocks
+
+    # Order by page so consecutive-page runs are detected even if the JSON
+    # listed tables out of page order.
+    table_indices.sort(key=lambda i: (blocks[i].get('page_number') or 0, i))
+
+    runs: List[List[int]] = []
+    current_run: List[int] = [table_indices[0]]
+
+    for next_idx in table_indices[1:]:
+        prev_idx = current_run[-1]
+        prev_block = blocks[prev_idx]
+        next_block = blocks[next_idx]
+
+        prev_page = prev_block.get('page_number') or 0
+        next_page = next_block.get('page_number') or 0
+
+        prev_cols = _count_table_columns(prev_block.get('markdown_content') or '')
+        next_cols = _count_table_columns(next_block.get('markdown_content') or '')
+
+        consecutive = next_page == prev_page + 1
+        same_shape = prev_cols > 0 and prev_cols == next_cols
+
+        if consecutive and same_shape:
+            current_run.append(next_idx)
+        else:
+            if len(current_run) > 1:
+                runs.append(current_run)
+            current_run = [next_idx]
+
+    if len(current_run) > 1:
+        runs.append(current_run)
+
+    if not runs:
+        return blocks
+
+    drop_indices: set = set()
+    for run in runs:
+        head = blocks[run[0]]
+        tail = blocks[run[-1]]
+
+        combined_md = head.get('markdown_content') or ''
+        combined_text_parts = [head.get('text_content') or '']
+
+        for idx in run[1:]:
+            block = blocks[idx]
+            md = block.get('markdown_content') or ''
+            txt = block.get('text_content') or ''
+            if md:
+                combined_md = (combined_md + '\n' + md) if combined_md else md
+            if txt:
+                combined_text_parts.append(txt)
+            drop_indices.add(idx)
+
+        head['markdown_content'] = combined_md
+        combined_text = '\n'.join(p for p in combined_text_parts if p)
+        head['text_content'] = combined_text or None
+
+        first_page = head.get('page_number')
+        last_page = tail.get('page_number')
+        if first_page is not None and last_page is not None and first_page != last_page:
+            head['page_range'] = f"{first_page}-{last_page}"
+
+    merged_blocks = [b for i, b in enumerate(blocks) if i not in drop_indices]
+    logger.info(
+        f"Merged {sum(len(r) for r in runs)} table blocks into "
+        f"{len(runs)} multi-page tables (dropped {len(drop_indices)} continuation fragments)"
+    )
+    return merged_blocks
+
+
 def extract_blocks_from_json(doc_json: Dict[str, Any], document_id: str) -> List[Dict[str, Any]]:
     """
     Extract all blocks from Docling JSON output.
@@ -502,6 +710,12 @@ def extract_blocks_from_json(doc_json: Dict[str, Any], document_id: str) -> List
         f"({skipped} skipped)"
     )
 
+    # Post-processing: catch boilerplate Docling missed and stitch multi-page tables.
+    # Order matters — run header detection first so the table merger can ignore
+    # repeated boilerplate when reasoning about adjacent pages.
+    blocks = mark_repeated_content_as_page_headers(blocks)
+    blocks = merge_consecutive_table_blocks(blocks)
+
     return blocks
 
 
@@ -517,5 +731,7 @@ __all__ = [
     "extract_metadata",
     "extract_block_data",
     "extract_blocks_from_json",
+    "mark_repeated_content_as_page_headers",
+    "merge_consecutive_table_blocks",
     "_is_picture_child",
 ]

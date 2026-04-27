@@ -37,8 +37,8 @@ python src/main.py
 python src/pipeline/step0_registration.py
 python src/pipeline/step1_parsing.py
 python src/pipeline/step2_segmentation.py
-python src/pipeline/step3_cleanup.py
-python src/pipeline/step4_tables.py
+python src/pipeline/step3_tables.py
+python src/pipeline/step4_cleanup.py
 python src/pipeline/step5_chunking.py
 python src/pipeline/step6_embeddings.py
 python src/pipeline/step7_qa.py
@@ -73,13 +73,14 @@ Each step's re-run behaviour:
 | 0 | Skips silently if document checksum already registered |
 | 1 | **Hard skip** — exits immediately if `raw_blocks` exist; no overwrite flag |
 | 2 | **Always clears and re-inserts** — deletes all `sections` rows and resets `raw_blocks.section_id` to NULL before re-running |
-| 3 | **Errors** unless `--overwrite` is passed, which deletes existing `parent_chunks` first |
+| 3 | Writes linearized prose to `raw_blocks.text_content` for each table block; safe to re-run (overwrites prior linearization) |
+| 4 | **Errors** unless `--overwrite` is passed, which deletes existing `parent_chunks` first |
 
 **Cascade rule:** re-running step N invalidates all data from steps N+1 onward. Always re-run subsequent steps after any earlier step.
 
-### Reset back to "just after step1" (re-run step2 + step3 fresh)
+### Reset back to "just after step1" (re-run step2 + step3 + step4 fresh)
 ```bash
-sqlite3 "data/<name>_rag.db" "DELETE FROM sections; UPDATE raw_blocks SET section_id = NULL; DELETE FROM parent_chunks;"
+sqlite3 "data/<name>_rag.db" "DELETE FROM sections; UPDATE raw_blocks SET section_id = NULL, text_content = NULL WHERE block_type = 'table'; DELETE FROM parent_chunks;"
 ```
 
 ### Reset everything including the parse (force step1 to re-run)
@@ -168,23 +169,26 @@ The pipeline is an **8-step sequential ETL process** where each step writes to S
 - ✅ Works across different document formats
 - ✅ More robust and maintainable (~100 lines of code removed)
 
-#### Step 3: Cleanup and Parent Chunk Construction
+#### Step 3: Table Linearization
+- Runs **before** Step 4 so linearized prose is available when parent chunks are built (no `[TABLE]` markers, accurate token counts from the start)
+- Reads `raw_blocks` where `block_type = 'table'`, preprocesses markdown via `src/utils/tables/table_normalizer.py`, sends to LLM (`TABLE_LLM_MODEL`, OpenAI chat API), writes prose to `raw_blocks.text_content`
+- **Critical**: Tables in UCG often detail Level of Care (LOC) codes aligned with points without splitting cells (see page 641/644)
+- Vaccine schedules: Convert each row into precise logical statements
+- Most tables (<50 rows, <10 columns): Use LLM with strict prompt
+- Large tables (>50 rows or >10 columns): Store markdown + summary chunk
+- **Transaction**: Per-block updates to `raw_blocks.text_content` batched
+- **Validation**: Automated checks for dose patterns, numeric consistency, age specifications
+
+#### Step 4: Cleanup and Parent Chunk Construction
 - Remove noise: page markers, headers/footers
 - Normalize characters, standardize bullets, enforce heading levels
+- For table blocks, `clean_block()` reads `raw_blocks.text_content` (set by Step 3); falls back to raw markdown with a warning if Step 3 didn't run
 - Preserve clinical references and conditional logic
 - **Parent Chunk Rule**: Concatenate all cleaned markdown per section (level=2, typically one disease)
   - Target: 1,000-1,500 tokens (hard max 2,000)
   - If >2,000 tokens, split ONLY at subsection boundaries, never mid-paragraph
 - **Transaction**: Batch transactions per 10 sections
 - **Output**: Parent chunks represent complete clinical topics
-
-#### Step 4: Table Linearization
-- **Critical**: Tables in UCG often detail Level of Care (LOC) codes aligned with points without splitting cells (see page 641/644)
-- Vaccine schedules: Convert each row into precise logical statements
-- Most tables (<50 rows, <10 columns): Use LLM with strict prompt
-- Large tables (>50 rows or >10 columns): Store markdown + summary chunk
-- **Transaction**: Batch transactions per 10 sections
-- **Validation**: Automated checks for dose patterns, numeric consistency, age specifications
 
 **LLM Table Transformation Prompt**:
 ```
@@ -279,7 +283,8 @@ Each pipeline step has specific transaction batching:
 - Step 0 (Registration): Single transaction
 - Step 1 (Parsing): Per 100 blocks
 - Step 2 (Segmentation): Per chapter
-- Step 3-4 (Cleanup/Tables): Per 10 sections
+- Step 3 (Tables): Per-block writes to `raw_blocks.text_content`, batched
+- Step 4 (Cleanup): Per 10 sections
 - Step 5 (Chunking): Per disease/topic
 - Step 6 (Embeddings): Per 100 chunks
 
@@ -347,12 +352,12 @@ The full Docling JSON output is preserved in `documents.docling_json` for comple
 
 ## Known Issues and Root Causes
 
-### Database connection does not respect `--db` CLI flag in step3+
+### Database connection does not respect `--db` CLI flag in step4+
 
 `src/database/connections.py::get_connection()` defaults to `DATABASE_PATH` from
 config. All utility functions in `src/utils/cleanup/database.py` call it without
 arguments, so they always use the config's active database. The `--db` flag in
-step3 only affects `get_document_id()`. **To target a different database, change
+step4 only affects `get_document_id()`. **To target a different database, change
 `ACTIVE_PDF` in `src/config.py`.**
 
 ### Section header duplication in parent chunks (FIXED 2026-03-23)
@@ -371,5 +376,5 @@ indistinguishable from body text. These pollute parent chunks.
 
 **Root-cause fix:** Configure docling in step1 to suppress text embedded inside
 figure regions, or switch to a VLM model that treats figures as atomic units.
-Cannot be cleanly fixed in step3 without risky heuristics. Requires re-running
+Cannot be cleanly fixed in step4 without risky heuristics. Requires re-running
 step1.

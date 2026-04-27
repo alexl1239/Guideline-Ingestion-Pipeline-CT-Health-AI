@@ -10,8 +10,29 @@ Docling's native layout analysis, which is more robust and eliminates
 OCR errors, page offset bugs, and fuzzy matching issues.
 """
 
-from typing import List, Dict, Any, Optional, Set
+from typing import List, Dict, Any, Optional, Set, Tuple
 from src.utils.logging_config import logger
+
+
+def _block_page_span(block: Dict[str, Any]) -> Tuple[int, int]:
+    """
+    Effective (start, end) page span for a block.
+
+    Multi-page blocks (notably merged multi-page tables, where step 1
+    stitches contiguous table fragments into one logical block) carry a
+    `page_range` like "3-13". Single-page blocks just have `page_number`.
+    Returning a (start, end) tuple lets section assignment reason about
+    block extent uniformly without the caller caring which case applies.
+    """
+    page = block.get('page_number') or 0
+    page_range = block.get('page_range')
+    if page_range and isinstance(page_range, str) and '-' in page_range:
+        try:
+            start_str, end_str = page_range.split('-', 1)
+            return (int(start_str), int(end_str))
+        except (ValueError, TypeError):
+            pass
+    return (page, page)
 
 
 def _normalize_heading(text: str) -> str:
@@ -150,18 +171,44 @@ def assign_blocks_to_sections(
                 assigned_section = None
 
         # Fallback: page-based assignment for blocks before any header
-        # or when header matching fails
+        # or when header matching fails. The boundary walk relies on block_id
+        # reflecting document position, but Docling stores tables and texts in
+        # separate arrays so table block_ids are always > all text block_ids —
+        # tables therefore always land here regardless of their true position.
         if assigned_section is None and page in page_sections:
             candidates = page_sections[page]
             if candidates:
-                # For fallback, prefer highest level (most specific) section
-                # that starts on or before this page
+                block_start, block_end = _block_page_span(block)
+
+                # Prefer sections whose own page range fully contains the
+                # block's effective span. Critical for multi-page merged
+                # tables: a 10-page table starting on page 3 should land in
+                # the section that spans pages 3-13, not in a single-page
+                # section that also starts on page 3.
                 valid_candidates = [
                     s for s in candidates
-                    if s['page_start'] <= page
+                    if s['page_start'] <= block_start
                 ]
                 if valid_candidates:
-                    valid_candidates.sort(key=lambda s: (-s['level'], -s['page_start']))
+                    # Sort priority — chosen so a multi-page merged table lands
+                    # in the topic that owns its full page span, but a level-1
+                    # chapter doesn't trivially win just because it contains
+                    # everything:
+                    #   1. Deepest level first. Chapters span the whole doc
+                    #      and would otherwise always "contain" any block.
+                    #   2. Within a level, prefer sections that contain the
+                    #      full block span over those that don't.
+                    #   3. Tightest fit (smallest gap between section span
+                    #      and block span). Picks Policy History (3-13) over
+                    #      a nearby single-page section for a 3-13 table.
+                    #   4. Latest page_start as final tiebreaker.
+                    block_size = block_end - block_start
+                    valid_candidates.sort(key=lambda s: (
+                        -s['level'],
+                        0 if s['page_end'] >= block_end else 1,
+                        abs((s['page_end'] - s['page_start']) - block_size),
+                        -s['page_start'],
+                    ))
                     assigned_section = valid_candidates[0]
 
         if assigned_section:

@@ -1,5 +1,5 @@
 """
-Parent Chunk Construction for Cleanup (Step 3)
+Parent Chunk Construction for Cleanup (Step 4)
 
 Functions for building and splitting content units into parent chunks.
 Target: 1000-1500 tokens per parent chunk, hard max 2000 tokens.
