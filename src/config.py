@@ -229,7 +229,7 @@ DOCLING_VERSION = "2.0.0"  # Update this when upgrading Docling
 # Enables advanced vision-based document understanding for better accuracy
 # Trade-off: Significantly slower processing (3-5x) but improved quality
 # Set to True to enable VLM, False to use default lightweight parsing
-USE_DOCLING_VLM = False
+USE_DOCLING_VLM = True
 
 # VLM Model Selection
 # Available options:

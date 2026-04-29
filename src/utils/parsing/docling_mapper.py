@@ -607,6 +607,78 @@ def merge_consecutive_table_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[st
     return merged_blocks
 
 
+def _resolve_ref(ref_str: str, doc_json: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Resolve a Docling JSON ref like ``#/texts/5`` to the underlying element dict."""
+    if not isinstance(ref_str, str) or not ref_str.startswith('#/'):
+        return None
+    parts = ref_str[2:].split('/')
+    if len(parts) != 2:
+        return None
+    array_name, idx_str = parts
+    try:
+        idx = int(idx_str)
+    except ValueError:
+        return None
+    array = doc_json.get(array_name)
+    if not isinstance(array, list) or idx < 0 or idx >= len(array):
+        return None
+    return array[idx]
+
+
+def _walk_body_children(doc_json: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Walk ``body.children`` in document order, recursing into groups.
+
+    Docling 2.0 stores elements in separate type-keyed arrays (``texts``,
+    ``tables``, ``pictures``, ``groups``); the linear reading order is encoded
+    by the refs in ``body.children``. Iterating those arrays independently
+    puts every table after every text regardless of position, which destroys
+    the document-order signal that step2 segmentation relies on (block IDs are
+    assigned in list order, and section boundary walks assume block_id grows
+    monotonically with document position).
+
+    Groups are containers (lists, inline groups, captions) holding ordered
+    refs to their own children — recursed into so nested elements appear at
+    the right spot relative to surrounding paragraphs.
+    """
+    body = doc_json.get('body')
+    if not isinstance(body, dict):
+        return []
+    children = body.get('children')
+    if not isinstance(children, list):
+        return []
+
+    ordered: List[Dict[str, Any]] = []
+    visited_groups: set = set()
+
+    def visit(ref_str: str) -> None:
+        element = _resolve_ref(ref_str, doc_json)
+        if element is None:
+            return
+        if ref_str.startswith('#/groups/'):
+            # Guard against malformed self-references.
+            if ref_str in visited_groups:
+                return
+            visited_groups.add(ref_str)
+            group_children = element.get('children')
+            if isinstance(group_children, list):
+                for child in group_children:
+                    if isinstance(child, dict):
+                        nested_ref = child.get('$ref')
+                        if nested_ref:
+                            visit(nested_ref)
+        else:
+            ordered.append(element)
+
+    for child in children:
+        if isinstance(child, dict):
+            ref = child.get('$ref')
+            if ref:
+                visit(ref)
+
+    return ordered
+
+
 def extract_blocks_from_json(doc_json: Dict[str, Any], document_id: str) -> List[Dict[str, Any]]:
     """
     Extract all blocks from Docling JSON output.
@@ -631,11 +703,25 @@ def extract_blocks_from_json(doc_json: Dict[str, Any], document_id: str) -> List
         20000
     """
     blocks = []
-    elements = []
+    elements: List[Dict[str, Any]] = []
+
+    # Preferred path: walk body.children to get true document order. Block IDs
+    # are auto-assigned by SQLite in the order the rows are inserted, so the
+    # order produced here directly determines whether step2's boundary walk
+    # works at all.
+    ordered_elements = _walk_body_children(doc_json)
+    if ordered_elements:
+        elements = ordered_elements
+        logger.info(
+            f"Walked body.children → {len(elements)} elements in document order"
+        )
 
     # Docling 2.0: Iterate through element arrays directly
-    if 'texts' in doc_json or 'tables' in doc_json:
-        logger.info("Detected Docling 2.0 structure with element arrays")
+    elif 'texts' in doc_json or 'tables' in doc_json:
+        logger.warning(
+            "body.children unavailable — falling back to array concatenation. "
+            "Block IDs will NOT reflect document order; section assignment quality will degrade."
+        )
 
         # Collect from all element arrays
         for array_name in ['texts', 'tables', 'pictures', 'groups', 'key_value_items', 'form_items']:
@@ -734,4 +820,6 @@ __all__ = [
     "mark_repeated_content_as_page_headers",
     "merge_consecutive_table_blocks",
     "_is_picture_child",
+    "_walk_body_children",
+    "_resolve_ref",
 ]

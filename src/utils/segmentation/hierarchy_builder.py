@@ -59,7 +59,15 @@ def _find_header_block_for_section(
     # Normalize section heading for matching
     normalized_section = _normalize_heading(section_heading)
 
-    # Look for matching header blocks near the section's page_start
+    # Two-pass scan: collect exact matches and containment matches separately,
+    # then prefer exact. Iteration order would otherwise return whichever match
+    # came first — if a containment match (e.g. chapter header "Commercial
+    # Reimbursement Policy" containing "Policy") precedes the true exact match
+    # for "Policy", every subsequent section shifts by one boundary and the
+    # entire section→block mapping desyncs.
+    exact_matches: List[Dict[str, Any]] = []
+    contain_matches: List[Dict[str, Any]] = []
+
     for block in header_blocks:
         if block['page_number'] < section_page_start - 1:
             continue
@@ -69,11 +77,22 @@ def _find_header_block_for_section(
         block_text = block.get('text_content', '')
         normalized_block = _normalize_heading(block_text)
 
-        # Check for match (either exact or section heading contains block text)
+        if not normalized_block:
+            continue
+
         if normalized_block == normalized_section:
-            return block['id']
-        if normalized_block in normalized_section or normalized_section in normalized_block:
-            return block['id']
+            exact_matches.append(block)
+        elif normalized_block in normalized_section or normalized_section in normalized_block:
+            contain_matches.append(block)
+
+    # Prefer the exact match closest to the section's declared page_start.
+    if exact_matches:
+        exact_matches.sort(key=lambda b: abs(b['page_number'] - section_page_start))
+        return exact_matches[0]['id']
+
+    if contain_matches:
+        contain_matches.sort(key=lambda b: abs(b['page_number'] - section_page_start))
+        return contain_matches[0]['id']
 
     return None
 
@@ -169,6 +188,17 @@ def assign_blocks_to_sections(
             if not (assigned_section['page_start'] <= page <= assigned_section['page_end']):
                 # Fall back to page-based assignment
                 assigned_section = None
+        elif section_boundaries:
+            # Block sits before the first matched header (e.g. cover-page form
+            # fields, document subject line). Attach to the first section so
+            # this content lands somewhere with a real heading instead of
+            # leaking into a downstream level-2 chunk via page-based fallback.
+            # Note: section_boundaries is sorted by header_block_id ascending,
+            # so [0] is the earliest header in the document — typically the
+            # chapter (level 1) when one exists, but otherwise the first
+            # in-document section, which is still the right home for content
+            # that precedes everything else.
+            assigned_section = section_boundaries[0][1]
 
         # Fallback: page-based assignment for blocks before any header
         # or when header matching fails. The boundary walk relies on block_id
